@@ -5,7 +5,10 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"text/tabwriter"
+	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
 	"github.com/spf13/cobra"
@@ -17,13 +20,42 @@ var instanceCmd = &cobra.Command{
 	Short: "Instance operations",
 }
 
+var instanceListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all instances",
+	RunE:  runInstanceList,
+}
+
+var instanceGetCmd = &cobra.Command{
+	Use:   "get <instance-id>",
+	Short: "Get instance details",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runInstanceGet,
+}
+
 var instanceCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create an instance",
 	RunE:  runInstanceCreate,
 }
 
+var instanceUpdateCmd = &cobra.Command{
+	Use:   "update <instance-id>",
+	Short: "Update an instance",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runInstanceUpdate,
+}
+
+var instanceDeleteCmd = &cobra.Command{
+	Use:   "delete <instance-id>",
+	Short: "Delete an instance",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runInstanceDelete,
+}
+
 func init() {
+	instanceListCmd.Flags().Bool("json", false, "output raw JSON")
+
 	instanceCreateCmd.Flags().String("name", "", "name for the instance (required)")
 	instanceCreateCmd.Flags().String("vpc-id", "", "VPC ID (required)")
 	instanceCreateCmd.Flags().String("subnet-id", "", "subnet ID for the network interface (required)")
@@ -37,8 +69,138 @@ func init() {
 	instanceCreateCmd.MarkFlagRequired("instance-type-id")
 	instanceCreateCmd.MarkFlagRequired("tenant-id")
 
+	instanceUpdateCmd.Flags().String("name", "", "new name")
+	instanceUpdateCmd.Flags().String("description", "", "new description")
+
 	rootCmd.AddCommand(instanceCmd)
+	instanceCmd.AddCommand(instanceListCmd)
+	instanceCmd.AddCommand(instanceGetCmd)
 	instanceCmd.AddCommand(instanceCreateCmd)
+	instanceCmd.AddCommand(instanceUpdateCmd)
+	instanceCmd.AddCommand(instanceDeleteCmd)
+}
+
+func runInstanceList(cmd *cobra.Command, args []string) error {
+	org := viper.GetString("api.org")
+	if org == "" {
+		return fmt.Errorf("org is required: set api.org in config or pass --org")
+	}
+
+	apiClient := newAPIClient()
+	ctx, err := apiContext()
+	if err != nil {
+		return err
+	}
+
+	instances, resp, err := apiClient.InstanceAPI.GetAllInstance(ctx, org).Execute()
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return fmt.Errorf("listing instances (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return fmt.Errorf("listing instances: %v", err)
+	}
+
+	jsonFlag, _ := cmd.Flags().GetBool("json")
+	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")
+	switch {
+	case jsonFlag || outputFlag == "json":
+		return printJSON(os.Stdout, instances)
+	case outputFlag == "yaml":
+		return printYAML(os.Stdout, instances)
+	default:
+		return printInstanceTable(os.Stdout, instances)
+	}
+}
+
+func runInstanceGet(cmd *cobra.Command, args []string) error {
+	org := viper.GetString("api.org")
+	if org == "" {
+		return fmt.Errorf("org is required: set api.org in config or pass --org")
+	}
+
+	apiClient := newAPIClient()
+	ctx, err := apiContext()
+	if err != nil {
+		return err
+	}
+
+	instance, resp, err := apiClient.InstanceAPI.GetInstance(ctx, org, args[0]).Execute()
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return fmt.Errorf("getting instance (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return fmt.Errorf("getting instance: %v", err)
+	}
+
+	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")
+	switch outputFlag {
+	case "yaml":
+		return printYAML(os.Stdout, instance)
+	default:
+		return printJSON(os.Stdout, instance)
+	}
+}
+
+func runInstanceUpdate(cmd *cobra.Command, args []string) error {
+	org := viper.GetString("api.org")
+	if org == "" {
+		return fmt.Errorf("org is required: set api.org in config or pass --org")
+	}
+
+	apiClient := newAPIClient()
+	ctx, err := apiContext()
+	if err != nil {
+		return err
+	}
+
+	req := client.NewInstanceUpdateRequest()
+	if cmd.Flags().Changed("name") {
+		name, _ := cmd.Flags().GetString("name")
+		req.SetName(name)
+	}
+	if cmd.Flags().Changed("description") {
+		description, _ := cmd.Flags().GetString("description")
+		req.SetDescription(description)
+	}
+
+	instance, resp, err := apiClient.InstanceAPI.UpdateInstance(ctx, org, args[0]).InstanceUpdateRequest(*req).Execute()
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return fmt.Errorf("updating instance (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return fmt.Errorf("updating instance: %v", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Instance updated: %s (%s)\n", ptrStr(instance.Name), ptrStr(instance.Id))
+	return printJSON(os.Stdout, instance)
+}
+
+func runInstanceDelete(cmd *cobra.Command, args []string) error {
+	org := viper.GetString("api.org")
+	if org == "" {
+		return fmt.Errorf("org is required: set api.org in config or pass --org")
+	}
+
+	apiClient := newAPIClient()
+	ctx, err := apiContext()
+	if err != nil {
+		return err
+	}
+
+	resp, err := apiClient.InstanceAPI.DeleteInstance(ctx, org, args[0]).Execute()
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return fmt.Errorf("deleting instance (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return fmt.Errorf("deleting instance: %v", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Instance deleted: %s\n", args[0])
+	return nil
 }
 
 func runInstanceCreate(cmd *cobra.Command, args []string) error {
@@ -87,4 +249,28 @@ func runInstanceCreate(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Instance created: %s (%s)\n", ptrStr(instance.Name), ptrStr(instance.Id))
 	return printJSON(os.Stdout, instance)
+}
+
+func printInstanceTable(w io.Writer, instances []client.Instance) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE ID\tVPC ID\tAGE\tID")
+
+	for _, inst := range instances {
+		name := ptrStr(inst.Name)
+		id := ptrStr(inst.Id)
+		siteID := ptrStr(inst.SiteId)
+		vpcID := ptrStr(inst.VpcId)
+		status := ""
+		if inst.Status != nil {
+			status = string(*inst.Status)
+		}
+		age := "<unknown>"
+		if inst.Created != nil {
+			age = formatAge(time.Since(*inst.Created))
+		}
+
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", name, status, siteID, vpcID, age, id)
+	}
+
+	return tw.Flush()
 }

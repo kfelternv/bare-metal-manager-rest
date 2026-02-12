@@ -29,10 +29,49 @@ var siteListCmd = &cobra.Command{
 	RunE:  runSiteList,
 }
 
+var siteGetCmd = &cobra.Command{
+	Use:   "get <site-id>",
+	Short: "Get site details",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSiteGet,
+}
+
+var siteCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a site",
+	RunE:  runSiteCreate,
+}
+
+var siteUpdateCmd = &cobra.Command{
+	Use:   "update <site-id>",
+	Short: "Update a site",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSiteUpdate,
+}
+
+var siteDeleteCmd = &cobra.Command{
+	Use:   "delete <site-id>",
+	Short: "Delete a site",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSiteDelete,
+}
+
 func init() {
 	siteListCmd.Flags().Bool("json", false, "output raw JSON")
+
+	siteCreateCmd.Flags().String("name", "", "name for the site (required)")
+	siteCreateCmd.Flags().String("description", "", "optional description")
+	siteCreateCmd.MarkFlagRequired("name")
+
+	siteUpdateCmd.Flags().String("name", "", "new name")
+	siteUpdateCmd.Flags().String("description", "", "new description")
+
 	rootCmd.AddCommand(siteCmd)
 	siteCmd.AddCommand(siteListCmd)
+	siteCmd.AddCommand(siteGetCmd)
+	siteCmd.AddCommand(siteCreateCmd)
+	siteCmd.AddCommand(siteUpdateCmd)
+	siteCmd.AddCommand(siteDeleteCmd)
 }
 
 func newAPIClient() *client.APIClient {
@@ -85,6 +124,141 @@ func runSiteList(cmd *cobra.Command, args []string) error {
 	default:
 		return printSiteTable(os.Stdout, sites)
 	}
+}
+
+func runSiteGet(cmd *cobra.Command, args []string) error {
+	org := viper.GetString("api.org")
+	if org == "" {
+		return fmt.Errorf("org is required: set api.org in config or pass --org")
+	}
+
+	apiClient := newAPIClient()
+	ctx, err := apiContext()
+	if err != nil {
+		return err
+	}
+
+	site, resp, err := apiClient.SiteAPI.GetSite(ctx, org, args[0]).Execute()
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return fmt.Errorf("getting site (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return fmt.Errorf("getting site: %v", err)
+	}
+
+	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")
+	switch outputFlag {
+	case "yaml":
+		return printYAML(os.Stdout, site)
+	default:
+		return printJSON(os.Stdout, site)
+	}
+}
+
+func runSiteCreate(cmd *cobra.Command, args []string) error {
+	org := viper.GetString("api.org")
+	if org == "" {
+		return fmt.Errorf("org is required: set api.org in config or pass --org")
+	}
+
+	name, _ := cmd.Flags().GetString("name")
+	description, _ := cmd.Flags().GetString("description")
+
+	apiClient := newAPIClient()
+	ctx, err := apiContext()
+	if err != nil {
+		return err
+	}
+
+	req := client.NewSiteCreateRequest(name)
+	if description != "" {
+		req.SetDescription(description)
+	}
+
+	site, resp, err := apiClient.SiteAPI.CreateSite(ctx, org).SiteCreateRequest(*req).Execute()
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return fmt.Errorf("creating site (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return fmt.Errorf("creating site: %v", err)
+	}
+
+	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")
+	switch outputFlag {
+	case "yaml":
+		return printYAML(os.Stdout, site)
+	default:
+		fmt.Fprintf(os.Stderr, "Site created: %s (%s)\n", ptrStr(site.Name), ptrStr(site.Id))
+		return printJSON(os.Stdout, site)
+	}
+}
+
+func runSiteUpdate(cmd *cobra.Command, args []string) error {
+	org := viper.GetString("api.org")
+	if org == "" {
+		return fmt.Errorf("org is required: set api.org in config or pass --org")
+	}
+
+	apiClient := newAPIClient()
+	ctx, err := apiContext()
+	if err != nil {
+		return err
+	}
+
+	req := client.NewSiteUpdateRequest()
+	if cmd.Flags().Changed("name") {
+		name, _ := cmd.Flags().GetString("name")
+		req.SetName(name)
+	}
+	if cmd.Flags().Changed("description") {
+		description, _ := cmd.Flags().GetString("description")
+		req.SetDescription(description)
+	}
+
+	site, resp, err := apiClient.SiteAPI.UpdateSite(ctx, org, args[0]).SiteUpdateRequest(*req).Execute()
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return fmt.Errorf("updating site (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return fmt.Errorf("updating site: %v", err)
+	}
+
+	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")
+	switch outputFlag {
+	case "yaml":
+		return printYAML(os.Stdout, site)
+	default:
+		fmt.Fprintf(os.Stderr, "Site updated: %s (%s)\n", ptrStr(site.Name), ptrStr(site.Id))
+		return printJSON(os.Stdout, site)
+	}
+}
+
+func runSiteDelete(cmd *cobra.Command, args []string) error {
+	org := viper.GetString("api.org")
+	if org == "" {
+		return fmt.Errorf("org is required: set api.org in config or pass --org")
+	}
+
+	apiClient := newAPIClient()
+	ctx, err := apiContext()
+	if err != nil {
+		return err
+	}
+
+	resp, err := apiClient.SiteAPI.DeleteSite(ctx, org, args[0]).Execute()
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return fmt.Errorf("deleting site (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return fmt.Errorf("deleting site: %v", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Site deleted: %s\n", args[0])
+	return nil
 }
 
 func printJSON(w io.Writer, v interface{}) error {

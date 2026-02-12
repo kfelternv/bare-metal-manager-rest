@@ -6,6 +6,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // FetchFunc fetches resources from the API and returns them as NamedItems
@@ -127,6 +128,34 @@ func (r *Resolver) SelectFromItems(label string, items []NamedItem) (*NamedItem,
 	}
 
 	return nil, fmt.Errorf("selected item not found")
+}
+
+// ResolveWithArgs resolves a resource either from the provided args (name or ID)
+// or by showing the interactive select widget. If args are provided, the first
+// arg is matched by name or ID against the cached items. If no args or no match,
+// the full interactive select widget is shown.
+func (r *Resolver) ResolveWithArgs(ctx context.Context, resourceType, label string, args []string) (*NamedItem, error) {
+	items, err := r.Fetch(ctx, resourceType)
+	if err != nil {
+		return nil, fmt.Errorf("fetching %s: %w", resourceType, err)
+	}
+
+	// If args provided, try to match by name or ID
+	if len(args) > 0 && args[0] != "" {
+		query := strings.ToLower(args[0])
+		for _, item := range items {
+			if strings.ToLower(item.Name) == query || strings.ToLower(item.ID) == query {
+				fmt.Printf("%s %s %s\n", Bold(label+":"), Green(item.Name), Dim("(matched)"))
+				return &item, nil
+			}
+		}
+		// No exact match -- show all items in select widget, pre-filtered would
+		// be nice but we keep it simple and show an error
+		return nil, fmt.Errorf("no %s matching %q found", resourceType, args[0])
+	}
+
+	// No args -- always show the interactive select widget
+	return r.SelectFromItems(label, items)
 }
 
 // ResolveName looks up a name in the cache and returns the UUID, or empty string

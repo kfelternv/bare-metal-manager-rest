@@ -32,6 +32,27 @@ var vpcCreateCmd = &cobra.Command{
 	RunE:  runVpcCreate,
 }
 
+var vpcGetCmd = &cobra.Command{
+	Use:   "get <vpc-id>",
+	Short: "Get VPC details",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runVpcGet,
+}
+
+var vpcUpdateCmd = &cobra.Command{
+	Use:   "update <vpc-id>",
+	Short: "Update a VPC",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runVpcUpdate,
+}
+
+var vpcDeleteCmd = &cobra.Command{
+	Use:   "delete <vpc-id>",
+	Short: "Delete a VPC",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runVpcDelete,
+}
+
 func init() {
 	vpcListCmd.Flags().Bool("json", false, "output raw JSON")
 
@@ -41,9 +62,15 @@ func init() {
 	vpcCreateCmd.MarkFlagRequired("name")
 	vpcCreateCmd.MarkFlagRequired("site-id")
 
+	vpcUpdateCmd.Flags().String("name", "", "new name")
+	vpcUpdateCmd.Flags().String("description", "", "new description")
+
 	rootCmd.AddCommand(vpcCmd)
 	vpcCmd.AddCommand(vpcListCmd)
 	vpcCmd.AddCommand(vpcCreateCmd)
+	vpcCmd.AddCommand(vpcGetCmd)
+	vpcCmd.AddCommand(vpcUpdateCmd)
+	vpcCmd.AddCommand(vpcDeleteCmd)
 }
 
 func runVpcList(cmd *cobra.Command, args []string) error {
@@ -77,6 +104,96 @@ func runVpcList(cmd *cobra.Command, args []string) error {
 	default:
 		return printVpcTable(os.Stdout, vpcs)
 	}
+}
+
+func runVpcGet(cmd *cobra.Command, args []string) error {
+	org := viper.GetString("api.org")
+	if org == "" {
+		return fmt.Errorf("org is required: set api.org in config or pass --org")
+	}
+
+	apiClient := newAPIClient()
+	ctx, err := apiContext()
+	if err != nil {
+		return err
+	}
+
+	vpc, resp, err := apiClient.VPCAPI.GetVpc(ctx, org, args[0]).Execute()
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return fmt.Errorf("getting VPC (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return fmt.Errorf("getting VPC: %v", err)
+	}
+
+	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")
+	switch outputFlag {
+	case "yaml":
+		return printYAML(os.Stdout, vpc)
+	default:
+		return printJSON(os.Stdout, vpc)
+	}
+}
+
+func runVpcUpdate(cmd *cobra.Command, args []string) error {
+	org := viper.GetString("api.org")
+	if org == "" {
+		return fmt.Errorf("org is required: set api.org in config or pass --org")
+	}
+
+	apiClient := newAPIClient()
+	ctx, err := apiContext()
+	if err != nil {
+		return err
+	}
+
+	req := client.NewVpcUpdateRequest()
+	if cmd.Flags().Changed("name") {
+		name, _ := cmd.Flags().GetString("name")
+		req.SetName(name)
+	}
+	if cmd.Flags().Changed("description") {
+		description, _ := cmd.Flags().GetString("description")
+		req.SetDescription(description)
+	}
+
+	vpc, resp, err := apiClient.VPCAPI.UpdateVpc(ctx, org, args[0]).VpcUpdateRequest(*req).Execute()
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return fmt.Errorf("updating VPC (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return fmt.Errorf("updating VPC: %v", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "VPC updated: %s (%s)\n", ptrStr(vpc.Name), ptrStr(vpc.Id))
+	return printJSON(os.Stdout, vpc)
+}
+
+func runVpcDelete(cmd *cobra.Command, args []string) error {
+	org := viper.GetString("api.org")
+	if org == "" {
+		return fmt.Errorf("org is required: set api.org in config or pass --org")
+	}
+
+	apiClient := newAPIClient()
+	ctx, err := apiContext()
+	if err != nil {
+		return err
+	}
+
+	resp, err := apiClient.VPCAPI.DeleteVpc(ctx, org, args[0]).Execute()
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return fmt.Errorf("deleting VPC (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return fmt.Errorf("deleting VPC: %v", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "VPC deleted: %s\n", args[0])
+	return nil
 }
 
 func runVpcCreate(cmd *cobra.Command, args []string) error {

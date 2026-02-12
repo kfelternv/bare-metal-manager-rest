@@ -5,6 +5,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -77,22 +78,63 @@ type Command struct {
 // AllCommands returns all available commands
 func AllCommands() []Command {
 	return []Command{
+		// Site
 		{Name: "site list", Description: "List all sites", Run: cmdSiteList},
+		{Name: "site get", Description: "Get site details", Run: cmdSiteGet},
+		{Name: "site delete", Description: "Delete a site", Run: cmdSiteDelete},
+
+		// VPC
 		{Name: "vpc list", Description: "List all VPCs", Run: cmdVPCList},
+		{Name: "vpc get", Description: "Get VPC details", Run: cmdVPCGet},
 		{Name: "vpc create", Description: "Create a VPC", Run: cmdVPCCreate},
+		{Name: "vpc delete", Description: "Delete a VPC", Run: cmdVPCDelete},
+
+		// Subnet
 		{Name: "subnet list", Description: "List all subnets", Run: cmdSubnetList},
+		{Name: "subnet get", Description: "Get subnet details", Run: cmdSubnetGet},
 		{Name: "subnet create", Description: "Create a subnet", Run: cmdSubnetCreate},
+		{Name: "subnet delete", Description: "Delete a subnet", Run: cmdSubnetDelete},
+
+		// Instance
 		{Name: "instance list", Description: "List all instances", Run: cmdInstanceList},
+		{Name: "instance get", Description: "Get instance details", Run: cmdInstanceGet},
 		{Name: "instance create", Description: "Create an instance (guided)", Run: cmdInstanceCreate},
+		{Name: "instance delete", Description: "Delete an instance", Run: cmdInstanceDelete},
+
+		// Instance Type
 		{Name: "instance-type list", Description: "List all instance types", Run: cmdInstanceTypeList},
+		{Name: "instance-type get", Description: "Get instance type details", Run: cmdInstanceTypeGet},
 		{Name: "instance-type create", Description: "Create an instance type", Run: cmdInstanceTypeCreate},
+		{Name: "instance-type delete", Description: "Delete an instance type", Run: cmdInstanceTypeDelete},
+
+		// Operating System
 		{Name: "operating-system list", Description: "List operating systems", Run: cmdOSList},
+		{Name: "operating-system get", Description: "Get operating system details", Run: cmdOSGet},
+
+		// SSH Key Group
 		{Name: "ssh-key-group list", Description: "List SSH key groups", Run: cmdSSHKeyGroupList},
+		{Name: "ssh-key-group get", Description: "Get SSH key group details", Run: cmdSSHKeyGroupGet},
+
+		// Allocation
 		{Name: "allocation list", Description: "List allocations", Run: cmdAllocationList},
+		{Name: "allocation get", Description: "Get allocation details", Run: cmdAllocationGet},
+		{Name: "allocation delete", Description: "Delete an allocation", Run: cmdAllocationDelete},
+
+		// Machine
 		{Name: "machine list", Description: "List machines", Run: cmdMachineList},
+		{Name: "machine get", Description: "Get machine details", Run: cmdMachineGet},
+
+		// IP Block
 		{Name: "ip-block list", Description: "List IP blocks", Run: cmdIPBlockList},
+		{Name: "ip-block get", Description: "Get IP block details", Run: cmdIPBlockGet},
 		{Name: "ip-block create", Description: "Create an IP block", Run: cmdIPBlockCreate},
+		{Name: "ip-block delete", Description: "Delete an IP block", Run: cmdIPBlockDelete},
+
+		// Network Security Group
 		{Name: "network-security-group list", Description: "List network security groups", Run: cmdNSGList},
+		{Name: "network-security-group get", Description: "Get network security group details", Run: cmdNSGGet},
+
+		// Session
 		{Name: "login", Description: "Login / refresh auth token", Run: cmdLogin},
 		{Name: "help", Description: "Show available commands", Run: cmdHelp},
 	}
@@ -685,6 +727,302 @@ func cmdNSGList(s *Session, args []string) error {
 	return printResourceTable(os.Stdout, "NAME", "STATUS", "ID", items)
 }
 
+// -- Get/Details command handlers --
+
+func cmdSiteGet(s *Session, args []string) error {
+	site, err := s.Resolver.ResolveWithArgs(s.Ctx, "site", "Site", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("site", "get", site.ID)
+	result, _, err := s.Client.SiteAPI.GetSite(s.Ctx, s.Org, site.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting site: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdVPCGet(s *Session, args []string) error {
+	vpc, err := s.Resolver.ResolveWithArgs(s.Ctx, "vpc", "VPC", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("vpc", "get", vpc.ID)
+	result, _, err := s.Client.VPCAPI.GetVpc(s.Ctx, s.Org, vpc.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting VPC: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdSubnetGet(s *Session, args []string) error {
+	subnet, err := s.Resolver.ResolveWithArgs(s.Ctx, "subnet", "Subnet", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("subnet", "get", subnet.ID)
+	result, _, err := s.Client.SubnetAPI.GetSubnet(s.Ctx, s.Org, subnet.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting subnet: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdInstanceGet(s *Session, args []string) error {
+	instance, err := s.Resolver.ResolveWithArgs(s.Ctx, "instance", "Instance", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("instance", "get", instance.ID)
+	result, _, err := s.Client.InstanceAPI.GetInstance(s.Ctx, s.Org, instance.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting instance: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdInstanceTypeGet(s *Session, args []string) error {
+	site, err := s.Resolver.Resolve(s.Ctx, "site", "Site")
+	if err != nil {
+		return err
+	}
+	items, err := s.fetchInstanceTypesBySite(s.Ctx, site.ID)
+	if err != nil {
+		return err
+	}
+	selected, err := s.Resolver.SelectFromItems("Instance Type", items)
+	if err != nil {
+		return err
+	}
+	LogCmd("instance-type", "get", selected.ID)
+	result, _, err := s.Client.InstanceTypeAPI.GetInstanceType(s.Ctx, s.Org, selected.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting instance type: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdOSGet(s *Session, args []string) error {
+	osItem, err := s.Resolver.ResolveWithArgs(s.Ctx, "operating-system", "Operating System", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("operating-system", "get", osItem.ID)
+	result, _, err := s.Client.OperatingSystemAPI.GetOperatingSystem(s.Ctx, s.Org, osItem.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting operating system: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdSSHKeyGroupGet(s *Session, args []string) error {
+	group, err := s.Resolver.ResolveWithArgs(s.Ctx, "ssh-key-group", "SSH Key Group", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("ssh-key-group", "get", group.ID)
+	result, _, err := s.Client.SSHKeyGroupAPI.GetSshKeyGroup(s.Ctx, s.Org, group.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting SSH key group: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdAllocationGet(s *Session, args []string) error {
+	alloc, err := s.Resolver.ResolveWithArgs(s.Ctx, "allocation", "Allocation", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("allocation", "get", alloc.ID)
+	result, _, err := s.Client.AllocationAPI.GetAllocation(s.Ctx, s.Org, alloc.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting allocation: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdMachineGet(s *Session, args []string) error {
+	machine, err := s.Resolver.ResolveWithArgs(s.Ctx, "machine", "Machine", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("machine", "get", machine.ID)
+	result, _, err := s.Client.MachineAPI.GetMachine(s.Ctx, s.Org, machine.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting machine: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdIPBlockGet(s *Session, args []string) error {
+	block, err := s.Resolver.ResolveWithArgs(s.Ctx, "ip-block", "IP Block", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("ip-block", "get", block.ID)
+	result, _, err := s.Client.IPBlockAPI.GetIpblock(s.Ctx, s.Org, block.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting IP block: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdNSGGet(s *Session, args []string) error {
+	nsg, err := s.Resolver.ResolveWithArgs(s.Ctx, "network-security-group", "Network Security Group", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("network-security-group", "get", nsg.ID)
+	result, _, err := s.Client.NetworkSecurityGroupAPI.GetNetworkSecurityGroup(s.Ctx, s.Org, nsg.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting network security group: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+// -- Delete command handlers --
+
+func cmdSiteDelete(s *Session, args []string) error {
+	site, err := s.Resolver.ResolveWithArgs(s.Ctx, "site", "Site to delete", args)
+	if err != nil {
+		return err
+	}
+	ok, err := PromptConfirm(fmt.Sprintf("Delete site %s (%s)?", site.Name, site.ID))
+	if err != nil || !ok {
+		return err
+	}
+	LogCmd("site", "delete", site.ID)
+	_, err = s.Client.SiteAPI.DeleteSite(s.Ctx, s.Org, site.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("deleting site: %w", err)
+	}
+	s.Cache.Invalidate("site")
+	fmt.Printf("%s Site deleted: %s\n", Green("OK"), site.Name)
+	return nil
+}
+
+func cmdVPCDelete(s *Session, args []string) error {
+	vpc, err := s.Resolver.ResolveWithArgs(s.Ctx, "vpc", "VPC to delete", args)
+	if err != nil {
+		return err
+	}
+	ok, err := PromptConfirm(fmt.Sprintf("Delete VPC %s (%s)?", vpc.Name, vpc.ID))
+	if err != nil || !ok {
+		return err
+	}
+	LogCmd("vpc", "delete", vpc.ID)
+	_, err = s.Client.VPCAPI.DeleteVpc(s.Ctx, s.Org, vpc.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("deleting VPC: %w", err)
+	}
+	s.Cache.Invalidate("vpc")
+	fmt.Printf("%s VPC deleted: %s\n", Green("OK"), vpc.Name)
+	return nil
+}
+
+func cmdSubnetDelete(s *Session, args []string) error {
+	subnet, err := s.Resolver.ResolveWithArgs(s.Ctx, "subnet", "Subnet to delete", args)
+	if err != nil {
+		return err
+	}
+	ok, err := PromptConfirm(fmt.Sprintf("Delete subnet %s (%s)?", subnet.Name, subnet.ID))
+	if err != nil || !ok {
+		return err
+	}
+	LogCmd("subnet", "delete", subnet.ID)
+	_, err = s.Client.SubnetAPI.DeleteSubnet(s.Ctx, s.Org, subnet.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("deleting subnet: %w", err)
+	}
+	s.Cache.Invalidate("subnet")
+	fmt.Printf("%s Subnet deleted: %s\n", Green("OK"), subnet.Name)
+	return nil
+}
+
+func cmdInstanceDelete(s *Session, args []string) error {
+	instance, err := s.Resolver.ResolveWithArgs(s.Ctx, "instance", "Instance to delete", args)
+	if err != nil {
+		return err
+	}
+	ok, err := PromptConfirm(fmt.Sprintf("Delete instance %s (%s)?", instance.Name, instance.ID))
+	if err != nil || !ok {
+		return err
+	}
+	LogCmd("instance", "delete", instance.ID)
+	_, err = s.Client.InstanceAPI.DeleteInstance(s.Ctx, s.Org, instance.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("deleting instance: %w", err)
+	}
+	s.Cache.Invalidate("instance")
+	fmt.Printf("%s Instance deleted: %s\n", Green("OK"), instance.Name)
+	return nil
+}
+
+func cmdInstanceTypeDelete(s *Session, args []string) error {
+	site, err := s.Resolver.Resolve(s.Ctx, "site", "Site")
+	if err != nil {
+		return err
+	}
+	items, err := s.fetchInstanceTypesBySite(s.Ctx, site.ID)
+	if err != nil {
+		return err
+	}
+	selected, err := s.Resolver.SelectFromItems("Instance Type to delete", items)
+	if err != nil {
+		return err
+	}
+	ok, err := PromptConfirm(fmt.Sprintf("Delete instance type %s (%s)?", selected.Name, selected.ID))
+	if err != nil || !ok {
+		return err
+	}
+	LogCmd("instance-type", "delete", selected.ID)
+	_, err = s.Client.InstanceTypeAPI.DeleteInstanceType(s.Ctx, s.Org, selected.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("deleting instance type: %w", err)
+	}
+	s.Cache.Invalidate("instance-type")
+	fmt.Printf("%s Instance type deleted: %s\n", Green("OK"), selected.Name)
+	return nil
+}
+
+func cmdAllocationDelete(s *Session, args []string) error {
+	alloc, err := s.Resolver.ResolveWithArgs(s.Ctx, "allocation", "Allocation to delete", args)
+	if err != nil {
+		return err
+	}
+	ok, err := PromptConfirm(fmt.Sprintf("Delete allocation %s (%s)?", alloc.Name, alloc.ID))
+	if err != nil || !ok {
+		return err
+	}
+	LogCmd("allocation", "delete", alloc.ID)
+	_, err = s.Client.AllocationAPI.DeleteAllocation(s.Ctx, s.Org, alloc.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("deleting allocation: %w", err)
+	}
+	s.Cache.Invalidate("allocation")
+	fmt.Printf("%s Allocation deleted: %s\n", Green("OK"), alloc.Name)
+	return nil
+}
+
+func cmdIPBlockDelete(s *Session, args []string) error {
+	block, err := s.Resolver.ResolveWithArgs(s.Ctx, "ip-block", "IP Block to delete", args)
+	if err != nil {
+		return err
+	}
+	ok, err := PromptConfirm(fmt.Sprintf("Delete IP block %s (%s)?", block.Name, block.ID))
+	if err != nil || !ok {
+		return err
+	}
+	LogCmd("ip-block", "delete", block.ID)
+	_, err = s.Client.IPBlockAPI.DeleteIpblock(s.Ctx, s.Org, block.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("deleting IP block: %w", err)
+	}
+	s.Cache.Invalidate("ip-block")
+	fmt.Printf("%s IP block deleted: %s\n", Green("OK"), block.Name)
+	return nil
+}
+
 func cmdLogin(s *Session, args []string) error {
 	if s.LoginFn == nil {
 		return fmt.Errorf("login not available (no OIDC provider configured)")
@@ -713,6 +1051,15 @@ func cmdHelp(s *Session, args []string) error {
 }
 
 // -- Helpers --
+
+func printDetailJSON(w io.Writer, v interface{}) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling output: %v", err)
+	}
+	fmt.Fprintln(w, string(data))
+	return nil
+}
 
 func printResourceTable(w io.Writer, col1, col2, col3 string, items []NamedItem) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)

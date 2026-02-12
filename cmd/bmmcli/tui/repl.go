@@ -11,6 +11,28 @@ import (
 
 const maxSuggestions = 6
 
+// argResourceMap maps command names to the resource type whose names should
+// be offered as argument completions. Only commands that accept a resource
+// name/ID as their first argument are listed here.
+var argResourceMap = map[string]string{
+	"site get":                     "site",
+	"site delete":                  "site",
+	"vpc get":                      "vpc",
+	"vpc delete":                   "vpc",
+	"subnet get":                   "subnet",
+	"subnet delete":                "subnet",
+	"instance get":                 "instance",
+	"instance delete":              "instance",
+	"allocation get":               "allocation",
+	"allocation delete":            "allocation",
+	"machine get":                  "machine",
+	"ip-block get":                 "ip-block",
+	"ip-block delete":              "ip-block",
+	"operating-system get":         "operating-system",
+	"ssh-key-group get":            "ssh-key-group",
+	"network-security-group get":   "network-security-group",
+}
+
 // RunREPL starts the interactive REPL loop with inline autocomplete
 func RunREPL(s *Session) error {
 	commands := AllCommands()
@@ -28,7 +50,7 @@ func RunREPL(s *Session) error {
 	fmt.Printf("Start typing a command. %s to quit.\n\n", Bold("Ctrl+D"))
 
 	for {
-		line, err := readLineWithSuggestions(s.Org, cmdNames)
+		line, err := readLineWithSuggestions(s, cmdNames)
 		if err != nil {
 			// Ctrl+D or read error
 			fmt.Println("\nGoodbye.")
@@ -80,8 +102,10 @@ func RunREPL(s *Session) error {
 }
 
 // readLineWithSuggestions reads a line in raw mode, showing matching suggestions
-// below the input as the user types.
-func readLineWithSuggestions(org string, cmdNames []string) (string, error) {
+// below the input as the user types. It suggests command names first, and once
+// the user has typed a complete command that accepts a resource argument (like
+// "site get "), it switches to suggesting resource names from the cache.
+func readLineWithSuggestions(s *Session, cmdNames []string) (string, error) {
 	restore, err := RawMode()
 	if err != nil {
 		return "", err
@@ -91,13 +115,17 @@ func readLineWithSuggestions(org string, cmdNames []string) (string, error) {
 		ShowCursor()
 	}()
 
-	prompt := Cyan("bmm:"+org) + "> "
+	prompt := Cyan("bmm:"+s.Org) + "> "
 	line := ""
 	selectedSuggestion := -1 // -1 = no suggestion selected
 	prevSuggestionCount := 0
 
+	allSuggestions := func() []string {
+		return getAllSuggestions(s, line, cmdNames)
+	}
+
 	renderInput := func() {
-		suggestions := getSuggestions(line, cmdNames)
+		suggestions := allSuggestions()
 		if len(suggestions) > maxSuggestions {
 			suggestions = suggestions[:maxSuggestions]
 		}
@@ -116,13 +144,13 @@ func readLineWithSuggestions(org string, cmdNames []string) (string, error) {
 
 		// Draw suggestions below
 		if len(line) > 0 && len(suggestions) > 0 {
-			for i, s := range suggestions {
+			for i, sg := range suggestions {
 				fmt.Print("\r\n")
 				ClearLine()
 				if i == selectedSuggestion {
-					fmt.Print("  " + Reverse(" "+s+" "))
+					fmt.Print("  " + Reverse(" "+sg+" "))
 				} else {
-					fmt.Print("  " + Dim(s))
+					fmt.Print("  " + Dim(sg))
 				}
 			}
 			// Move cursor back up to the input line
@@ -160,7 +188,7 @@ func readLineWithSuggestions(org string, cmdNames []string) (string, error) {
 			return "", fmt.Errorf("EOF")
 
 		case key.Char == KeyEnter || key.Char == KeyNewline:
-			suggestions := getSuggestions(line, cmdNames)
+			suggestions := allSuggestions()
 			if len(suggestions) > maxSuggestions {
 				suggestions = suggestions[:maxSuggestions]
 			}
@@ -183,7 +211,7 @@ func readLineWithSuggestions(org string, cmdNames []string) (string, error) {
 
 		case key.Char == '\t':
 			// Tab: accept top suggestion
-			suggestions := getSuggestions(line, cmdNames)
+			suggestions := allSuggestions()
 			if len(suggestions) > 0 {
 				idx := selectedSuggestion
 				if idx < 0 {
@@ -197,7 +225,7 @@ func readLineWithSuggestions(org string, cmdNames []string) (string, error) {
 			renderInput()
 
 		case key.Special == KeyDown:
-			suggestions := getSuggestions(line, cmdNames)
+			suggestions := allSuggestions()
 			if len(suggestions) > maxSuggestions {
 				suggestions = suggestions[:maxSuggestions]
 			}
@@ -210,7 +238,7 @@ func readLineWithSuggestions(org string, cmdNames []string) (string, error) {
 			renderInput()
 
 		case key.Special == KeyUp:
-			suggestions := getSuggestions(line, cmdNames)
+			suggestions := allSuggestions()
 			if len(suggestions) > maxSuggestions {
 				suggestions = suggestions[:maxSuggestions]
 			}
@@ -240,10 +268,58 @@ func readLineWithSuggestions(org string, cmdNames []string) (string, error) {
 	}
 }
 
-func getSuggestions(input string, cmdNames []string) []string {
+// getAllSuggestions returns suggestions for the current input. If the input
+// matches a command that accepts resource arguments (e.g. "site get "),
+// resource names are suggested. Otherwise command names are suggested.
+func getAllSuggestions(s *Session, input string, cmdNames []string) []string {
 	if input == "" {
 		return nil
 	}
+
+	// Check if input starts with a command that takes resource args + a space
+	for cmdPrefix, resourceType := range argResourceMap {
+		withSpace := cmdPrefix + " "
+		if strings.HasPrefix(strings.ToLower(input), strings.ToLower(withSpace)) {
+			argPart := input[len(withSpace):]
+			return getResourceSuggestions(s, cmdPrefix, resourceType, argPart)
+		}
+	}
+
+	// Fall back to command name suggestions
+	return getCommandSuggestions(input, cmdNames)
+}
+
+// getResourceSuggestions returns resource names matching the typed argument,
+// prefixed with the command so that accepting a suggestion fills the full line.
+func getResourceSuggestions(s *Session, cmdPrefix, resourceType, argFilter string) []string {
+	// Try to get items from cache (don't block on API calls during typing)
+	items := s.Cache.Get(resourceType)
+	if items == nil {
+		// Cache is empty -- try a background fetch so next keystroke has data.
+		// For now, fetch inline (it's fast for cached items).
+		fetched, err := s.Resolver.Fetch(s.Ctx, resourceType)
+		if err != nil {
+			return nil
+		}
+		items = fetched
+	}
+
+	lowerFilter := strings.ToLower(argFilter)
+	var matches []string
+	for _, item := range items {
+		name := item.Name
+		if name == "" {
+			name = item.ID
+		}
+		if lowerFilter == "" || strings.Contains(strings.ToLower(name), lowerFilter) {
+			matches = append(matches, cmdPrefix+" "+name)
+		}
+	}
+	return matches
+}
+
+// getCommandSuggestions returns command names matching the input prefix.
+func getCommandSuggestions(input string, cmdNames []string) []string {
 	lower := strings.ToLower(input)
 	var matches []string
 	for _, name := range cmdNames {

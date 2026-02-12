@@ -49,29 +49,39 @@ func RawMode() (restore func(), err error) {
 	}, nil
 }
 
-// ReadKey reads a single key event from stdin (must be in raw mode)
+// ReadKey reads a single key event from stdin (must be in raw mode).
+// It reads one byte at a time so that pasted text is not dropped.
+// The previous implementation read 3 bytes at once and discarded all
+// but the first when the input was not an escape sequence, which broke
+// copy-paste.
 func ReadKey() (KeyEvent, error) {
-	buf := make([]byte, 3)
-	n, err := os.Stdin.Read(buf)
+	// Read exactly one byte
+	buf := make([]byte, 1)
+	_, err := os.Stdin.Read(buf)
 	if err != nil {
 		return KeyEvent{}, err
 	}
-	if n == 0 {
-		return KeyEvent{}, nil
-	}
 
-	// Check for escape sequences (arrow keys)
-	if n == 3 && buf[0] == KeyEscape && buf[1] == '[' {
-		switch buf[2] {
-		case 'A':
-			return KeyEvent{Special: KeyUp}, nil
-		case 'B':
-			return KeyEvent{Special: KeyDown}, nil
-		case 'C':
-			return KeyEvent{Special: KeyRight}, nil
-		case 'D':
-			return KeyEvent{Special: KeyLeft}, nil
+	// If it is an escape character, read two more bytes for the CSI sequence
+	if buf[0] == KeyEscape {
+		seq := make([]byte, 2)
+		n, err := os.Stdin.Read(seq)
+		if err != nil || n < 2 {
+			return KeyEvent{Char: KeyEscape}, nil
 		}
+		if seq[0] == '[' {
+			switch seq[1] {
+			case 'A':
+				return KeyEvent{Special: KeyUp}, nil
+			case 'B':
+				return KeyEvent{Special: KeyDown}, nil
+			case 'C':
+				return KeyEvent{Special: KeyRight}, nil
+			case 'D':
+				return KeyEvent{Special: KeyLeft}, nil
+			}
+		}
+		return KeyEvent{Char: KeyEscape}, nil
 	}
 
 	return KeyEvent{Char: buf[0]}, nil
