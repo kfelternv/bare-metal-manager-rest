@@ -6,11 +6,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -55,6 +57,10 @@ var instanceDeleteCmd = &cobra.Command{
 
 func init() {
 	instanceListCmd.Flags().Bool("json", false, "output raw JSON")
+	instanceListCmd.Flags().String("vpc-id", "", "filter by VPC ID")
+	instanceListCmd.Flags().String("site-id", "", "filter by site ID")
+	instanceListCmd.Flags().String("status", "", "filter by status")
+	instanceListCmd.Flags().String("name", "", "filter by name")
 
 	instanceCreateCmd.Flags().String("name", "", "name for the instance (required)")
 	instanceCreateCmd.Flags().String("vpc-id", "", "VPC ID (required)")
@@ -92,7 +98,27 @@ func runInstanceList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	instances, resp, err := apiClient.InstanceAPI.GetAllInstance(ctx, org).Execute()
+	vpcID, _ := cmd.Flags().GetString("vpc-id")
+	siteID, _ := cmd.Flags().GetString("site-id")
+	status, _ := cmd.Flags().GetString("status")
+	name, _ := cmd.Flags().GetString("name")
+
+	instances, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Instance, *http.Response, error) {
+		req := apiClient.InstanceAPI.GetAllInstance(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if vpcID != "" {
+			req = req.VpcId(vpcID)
+		}
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		if status != "" {
+			req = req.Status(status)
+		}
+		if name != "" {
+			req = req.Name(name)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -100,6 +126,7 @@ func runInstanceList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing instances: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(instances))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

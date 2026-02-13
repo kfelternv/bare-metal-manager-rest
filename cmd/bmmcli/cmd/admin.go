@@ -9,10 +9,12 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -170,7 +172,9 @@ func runAuditList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	entries, resp, err := apiClient.AuditAPI.GetAllAuditEntry(ctx, org).Execute()
+	entries, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.AuditEntry, *http.Response, error) {
+		return apiClient.AuditAPI.GetAllAuditEntry(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -178,6 +182,7 @@ func runAuditList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing audit entries: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(entries))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")
@@ -440,6 +445,7 @@ func runMachineCapabilityList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing machine capabilities: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(caps))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

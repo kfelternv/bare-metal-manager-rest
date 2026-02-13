@@ -6,11 +6,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -55,6 +57,7 @@ var subnetDeleteCmd = &cobra.Command{
 
 func init() {
 	subnetListCmd.Flags().Bool("json", false, "output raw JSON")
+	subnetListCmd.Flags().String("vpc-id", "", "filter by VPC ID")
 
 	subnetCreateCmd.Flags().String("name", "", "name for the subnet (required)")
 	subnetCreateCmd.Flags().String("vpc-id", "", "VPC ID (required)")
@@ -87,8 +90,15 @@ func runSubnetList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	vpcID, _ := cmd.Flags().GetString("vpc-id")
 
-	subnets, resp, err := apiClient.SubnetAPI.GetAllSubnet(ctx, org).Execute()
+	subnets, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Subnet, *http.Response, error) {
+		req := apiClient.SubnetAPI.GetAllSubnet(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if vpcID != "" {
+			req = req.VpcId(vpcID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -96,6 +106,7 @@ func runSubnetList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing subnets: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(subnets))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

@@ -6,11 +6,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -55,6 +57,7 @@ var ipBlockDeleteCmd = &cobra.Command{
 
 func init() {
 	ipBlockListCmd.Flags().Bool("json", false, "output raw JSON")
+	ipBlockListCmd.Flags().String("site-id", "", "filter by site ID")
 
 	ipBlockCreateCmd.Flags().String("name", "", "name for the IP block (required)")
 	ipBlockCreateCmd.Flags().String("site-id", "", "site ID (required)")
@@ -87,8 +90,15 @@ func runIPBlockList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 
-	blocks, resp, err := apiClient.IPBlockAPI.GetAllIpblock(ctx, org).Execute()
+	blocks, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.IpBlock, *http.Response, error) {
+		req := apiClient.IPBlockAPI.GetAllIpblock(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -96,6 +106,7 @@ func runIPBlockList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing IP blocks: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(blocks))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

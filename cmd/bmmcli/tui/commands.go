@@ -8,30 +8,58 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/viper"
 )
 
 // LoginFunc is a callback to perform login and return a new token
 type LoginFunc func() (string, error)
 
+// Scope holds the current filter context for the interactive session.
+// When set, list commands automatically filter by these values.
+type Scope struct {
+	SiteID   string
+	SiteName string
+	VpcID    string
+	VpcName  string
+}
+
 // Session holds the shared state for an interactive session
 type Session struct {
 	Client   *client.APIClient
 	Ctx      context.Context
 	Org      string
+	Token    string // raw JWT token string for decoding claims
+	Scope    Scope  // current filter context
 	Cache    *Cache
 	Resolver *Resolver
 	LoginFn  LoginFunc // set by the caller to enable in-session login
 }
 
+// PromptString returns the prompt showing org and current scope.
+func (s *Session) PromptString() string {
+	parts := []string{s.Org}
+	if s.Scope.SiteName != "" {
+		parts = append(parts, s.Scope.SiteName)
+	}
+	if s.Scope.VpcName != "" {
+		parts = append(parts, s.Scope.VpcName)
+	}
+	return Cyan("bmm:"+strings.Join(parts, "/")) + "> "
+}
+
 // RefreshToken updates the session context with a new token
 func (s *Session) RefreshToken(token string) {
+	s.Token = token
 	s.Ctx = context.WithValue(context.Background(), client.ContextAccessToken, token)
 }
 
@@ -66,6 +94,16 @@ func (s *Session) registerFetchers() {
 	s.Resolver.RegisterFetcher("machine", s.fetchMachines)
 	s.Resolver.RegisterFetcher("ip-block", s.fetchIPBlocks)
 	s.Resolver.RegisterFetcher("network-security-group", s.fetchNetworkSecurityGroups)
+	s.Resolver.RegisterFetcher("audit", s.fetchAudits)
+	s.Resolver.RegisterFetcher("ssh-key", s.fetchSSHKeys)
+	s.Resolver.RegisterFetcher("sku", s.fetchSKUs)
+	s.Resolver.RegisterFetcher("rack", s.fetchRacks)
+	s.Resolver.RegisterFetcher("vpc-prefix", s.fetchVPCPrefixes)
+	s.Resolver.RegisterFetcher("tenant-account", s.fetchTenantAccounts)
+	s.Resolver.RegisterFetcher("expected-machine", s.fetchExpectedMachines)
+	s.Resolver.RegisterFetcher("dpu-extension-service", s.fetchDPUExtensionServices)
+	s.Resolver.RegisterFetcher("infiniband-partition", s.fetchInfiniBandPartitions)
+	s.Resolver.RegisterFetcher("nvlink-logical-partition", s.fetchNVLinkLogicalPartitions)
 }
 
 // Command represents a registered interactive command
@@ -134,6 +172,58 @@ func AllCommands() []Command {
 		{Name: "network-security-group list", Description: "List network security groups", Run: cmdNSGList},
 		{Name: "network-security-group get", Description: "Get network security group details", Run: cmdNSGGet},
 
+		// SSH Key
+		{Name: "ssh-key list", Description: "List SSH keys", Run: cmdSSHKeyList},
+		{Name: "ssh-key get", Description: "Get SSH key details", Run: cmdSSHKeyGet},
+
+		// SKU
+		{Name: "sku list", Description: "List SKUs", Run: cmdSKUList},
+		{Name: "sku get", Description: "Get SKU details", Run: cmdSKUGet},
+
+		// Rack
+		{Name: "rack list", Description: "List racks", Run: cmdRackList},
+		{Name: "rack get", Description: "Get rack details", Run: cmdRackGet},
+
+		// VPC Prefix
+		{Name: "vpc-prefix list", Description: "List VPC prefixes", Run: cmdVPCPrefixList},
+		{Name: "vpc-prefix get", Description: "Get VPC prefix details", Run: cmdVPCPrefixGet},
+
+		// Tenant Account
+		{Name: "tenant-account list", Description: "List tenant accounts", Run: cmdTenantAccountList},
+		{Name: "tenant-account get", Description: "Get tenant account details", Run: cmdTenantAccountGet},
+
+		// Expected Machine
+		{Name: "expected-machine list", Description: "List expected machines", Run: cmdExpectedMachineList},
+		{Name: "expected-machine get", Description: "Get expected machine details", Run: cmdExpectedMachineGet},
+
+		// DPU Extension Service
+		{Name: "dpu-extension-service list", Description: "List DPU extension services", Run: cmdDPUExtensionServiceList},
+		{Name: "dpu-extension-service get", Description: "Get DPU extension service details", Run: cmdDPUExtensionServiceGet},
+
+		// InfiniBand Partition
+		{Name: "infiniband-partition list", Description: "List InfiniBand partitions", Run: cmdInfiniBandPartitionList},
+		{Name: "infiniband-partition get", Description: "Get InfiniBand partition details", Run: cmdInfiniBandPartitionGet},
+
+		// NVLink Logical Partition
+		{Name: "nvlink-logical-partition list", Description: "List NVLink logical partitions", Run: cmdNVLinkLogicalPartitionList},
+		{Name: "nvlink-logical-partition get", Description: "Get NVLink logical partition details", Run: cmdNVLinkLogicalPartitionGet},
+
+		// Allocation Constraint (requires allocation context)
+		{Name: "allocation-constraint list", Description: "List allocation constraints for an allocation", Run: cmdAllocationConstraintList},
+		{Name: "allocation-constraint get", Description: "Get allocation constraint details", Run: cmdAllocationConstraintGet},
+
+		// Admin / informational
+		{Name: "audit list", Description: "List audit log entries", Run: cmdAuditList},
+		{Name: "audit get", Description: "Get audit log entry details", Run: cmdAuditGet},
+		{Name: "metadata get", Description: "Get API metadata", Run: cmdMetadataGet},
+		{Name: "user current", Description: "Get current user", Run: cmdUserCurrent},
+		{Name: "service-account current", Description: "Get current service account", Run: cmdServiceAccountCurrent},
+		{Name: "infrastructure-provider current", Description: "Get current infrastructure provider", Run: cmdInfrastructureProviderCurrent},
+		{Name: "infrastructure-provider stats", Description: "Get infrastructure provider stats", Run: cmdInfrastructureProviderStats},
+		{Name: "tenant current", Description: "Get current tenant", Run: cmdTenantCurrent},
+		{Name: "tenant stats", Description: "Get tenant stats", Run: cmdTenantStats},
+		{Name: "machine-capability list", Description: "List machine capabilities", Run: cmdMachineCapabilityList},
+
 		// Session
 		{Name: "login", Description: "Login / refresh auth token", Run: cmdLogin},
 		{Name: "help", Description: "Show available commands", Run: cmdHelp},
@@ -143,7 +233,9 @@ func AllCommands() []Command {
 // -- Fetchers --
 
 func (s *Session) fetchSites(ctx context.Context) ([]NamedItem, error) {
-	sites, _, err := s.Client.SiteAPI.GetAllSite(ctx, s.Org).Execute()
+	sites, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Site, *http.Response, error) {
+		return s.Client.SiteAPI.GetAllSite(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +256,14 @@ func (s *Session) fetchSites(ctx context.Context) ([]NamedItem, error) {
 }
 
 func (s *Session) fetchVPCs(ctx context.Context) ([]NamedItem, error) {
-	vpcs, _, err := s.Client.VPCAPI.GetAllVpc(ctx, s.Org).Execute()
+	scopeSiteID := s.Scope.SiteID
+	vpcs, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.VPC, *http.Response, error) {
+		req := s.Client.VPCAPI.GetAllVpc(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +285,14 @@ func (s *Session) fetchVPCs(ctx context.Context) ([]NamedItem, error) {
 }
 
 func (s *Session) fetchSubnets(ctx context.Context) ([]NamedItem, error) {
-	subnets, _, err := s.Client.SubnetAPI.GetAllSubnet(ctx, s.Org).Execute()
+	scopeVpcID := s.Scope.VpcID
+	subnets, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Subnet, *http.Response, error) {
+		req := s.Client.SubnetAPI.GetAllSubnet(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeVpcID != "" {
+			req = req.VpcId(scopeVpcID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +314,18 @@ func (s *Session) fetchSubnets(ctx context.Context) ([]NamedItem, error) {
 }
 
 func (s *Session) fetchInstances(ctx context.Context) ([]NamedItem, error) {
-	instances, _, err := s.Client.InstanceAPI.GetAllInstance(ctx, s.Org).Execute()
+	scopeSiteID := s.Scope.SiteID
+	scopeVpcID := s.Scope.VpcID
+	instances, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Instance, *http.Response, error) {
+		req := s.Client.InstanceAPI.GetAllInstance(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		if scopeVpcID != "" {
+			req = req.VpcId(scopeVpcID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +375,14 @@ func (s *Session) fetchInstanceTypesBySite(ctx context.Context, siteID string) (
 	if err != nil {
 		return nil, err
 	}
-	types, _, err := s.Client.InstanceTypeAPI.GetAllInstanceType(ctx, s.Org).SiteId(siteID).TenantId(tenantID).Execute()
+	types, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.InstanceType, *http.Response, error) {
+		return s.Client.InstanceTypeAPI.GetAllInstanceType(ctx, s.Org).
+			SiteId(siteID).
+			TenantId(tenantID).
+			PageNumber(pageNumber).
+			PageSize(pageSize).
+			Execute()
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +408,9 @@ func (s *Session) fetchInstanceTypesBySite(ctx context.Context, siteID string) (
 }
 
 func (s *Session) fetchOperatingSystems(ctx context.Context) ([]NamedItem, error) {
-	osList, _, err := s.Client.OperatingSystemAPI.GetAllOperatingSystem(ctx, s.Org).Execute()
+	osList, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.OperatingSystem, *http.Response, error) {
+		return s.Client.OperatingSystemAPI.GetAllOperatingSystem(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +431,9 @@ func (s *Session) fetchOperatingSystems(ctx context.Context) ([]NamedItem, error
 }
 
 func (s *Session) fetchSSHKeyGroups(ctx context.Context) ([]NamedItem, error) {
-	groups, _, err := s.Client.SSHKeyGroupAPI.GetAllSshKeyGroup(ctx, s.Org).Execute()
+	groups, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.SshKeyGroup, *http.Response, error) {
+		return s.Client.SSHKeyGroupAPI.GetAllSshKeyGroup(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +454,14 @@ func (s *Session) fetchSSHKeyGroups(ctx context.Context) ([]NamedItem, error) {
 }
 
 func (s *Session) fetchAllocations(ctx context.Context) ([]NamedItem, error) {
-	allocs, _, err := s.Client.AllocationAPI.GetAllAllocation(ctx, s.Org).Execute()
+	scopeSiteID := s.Scope.SiteID
+	allocs, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Allocation, *http.Response, error) {
+		req := s.Client.AllocationAPI.GetAllAllocation(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -348,17 +483,66 @@ func (s *Session) fetchAllocations(ctx context.Context) ([]NamedItem, error) {
 }
 
 func (s *Session) fetchMachines(ctx context.Context) ([]NamedItem, error) {
-	machines, _, err := s.Client.MachineAPI.GetAllMachine(ctx, s.Org).Execute()
+	return s.fetchMachinesWithScope(ctx, s.Scope.SiteID, s.Scope.VpcID)
+}
+
+func (s *Session) fetchMachinesWithSiteID(ctx context.Context, siteID string) ([]NamedItem, error) {
+	return s.fetchMachinesWithScope(ctx, siteID, s.Scope.VpcID)
+}
+
+func (s *Session) fetchMachinesWithScope(ctx context.Context, siteID, vpcID string) ([]NamedItem, error) {
+	machines, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Machine, *http.Response, error) {
+		req := s.Client.MachineAPI.GetAllMachine(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		return nil, err
 	}
+
+	// Machine API is site/provider-scoped; emulate VPC scoping by intersecting with
+	// instances currently attached to the selected VPC.
+	if vpcID != "" {
+		instances, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Instance, *http.Response, error) {
+			req := s.Client.InstanceAPI.GetAllInstance(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).VpcId(vpcID)
+			if siteID != "" {
+				req = req.SiteId(siteID)
+			}
+			return req.Execute()
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		machineIDs := make(map[string]struct{}, len(instances))
+		for _, inst := range instances {
+			if machineID, ok := inst.GetMachineIdOk(); ok && machineID != nil {
+				id := strings.TrimSpace(*machineID)
+				if id != "" {
+					machineIDs[id] = struct{}{}
+				}
+			}
+		}
+
+		filtered := make([]client.Machine, 0, len(machines))
+		for _, m := range machines {
+			id := strings.TrimSpace(ptrStr(m.Id))
+			if _, ok := machineIDs[id]; ok {
+				filtered = append(filtered, m)
+			}
+		}
+		machines = filtered
+	}
+
 	items := make([]NamedItem, len(machines))
 	for i, m := range machines {
 		status := ""
 		if m.Status != nil {
 			status = string(*m.Status)
 		}
-		name := ptrStr(m.Id)
+		name := machineDisplayName(m)
 		items[i] = NamedItem{
 			Name:   name,
 			ID:     ptrStr(m.Id),
@@ -370,8 +554,108 @@ func (s *Session) fetchMachines(ctx context.Context) ([]NamedItem, error) {
 	return items, nil
 }
 
+func (s *Session) machineVpcNamesByMachineID(ctx context.Context) (map[string]string, error) {
+	// Best effort warm-up so IDs can be resolved to names.
+	_, _ = s.Resolver.Fetch(ctx, "vpc")
+
+	scopeSiteID := s.Scope.SiteID
+	scopeVpcID := s.Scope.VpcID
+	instances, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Instance, *http.Response, error) {
+		req := s.Client.InstanceAPI.GetAllInstance(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		if scopeVpcID != "" {
+			req = req.VpcId(scopeVpcID)
+		}
+		return req.Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	vpcSetByMachineID := make(map[string]map[string]struct{})
+	for _, inst := range instances {
+		machineID := ""
+		if machineIDPtr, ok := inst.GetMachineIdOk(); ok && machineIDPtr != nil {
+			machineID = strings.TrimSpace(*machineIDPtr)
+		}
+		vpcID := strings.TrimSpace(ptrStr(inst.VpcId))
+		if machineID == "" || vpcID == "" {
+			continue
+		}
+		if vpcSetByMachineID[machineID] == nil {
+			vpcSetByMachineID[machineID] = make(map[string]struct{})
+		}
+		vpcSetByMachineID[machineID][vpcID] = struct{}{}
+	}
+
+	vpcNamesByMachineID := make(map[string]string, len(vpcSetByMachineID))
+	for machineID, vpcSet := range vpcSetByMachineID {
+		names := make([]string, 0, len(vpcSet))
+		for vpcID := range vpcSet {
+			name := strings.TrimSpace(s.Resolver.ResolveID("vpc", vpcID))
+			if name == "" {
+				name = vpcID
+			}
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		vpcNamesByMachineID[machineID] = strings.Join(names, ",")
+	}
+	return vpcNamesByMachineID, nil
+}
+
+func machineDisplayName(m client.Machine) string {
+	// Prefer user-friendly labels when available.
+	for _, key := range []string{"ServerName", "serverName", "hostname", "hostName"} {
+		if v, ok := m.Labels[key]; ok {
+			v = strings.TrimSpace(v)
+			if v != "" {
+				return v
+			}
+		}
+	}
+
+	// Then use the first non-empty interface hostname.
+	for _, iface := range m.MachineInterfaces {
+		if iface.Hostname != nil {
+			v := strings.TrimSpace(*iface.Hostname)
+			if v != "" {
+				return v
+			}
+		}
+	}
+
+	// Finally fall back to identifiers.
+	if m.SerialNumber != nil {
+		v := strings.TrimSpace(*m.SerialNumber)
+		if v != "" {
+			return v
+		}
+	}
+	if m.ControllerMachineId != nil {
+		v := strings.TrimSpace(*m.ControllerMachineId)
+		if v != "" {
+			return v
+		}
+	}
+	id := strings.TrimSpace(ptrStr(m.Id))
+	if id != "" {
+		return id
+	}
+	return "<unknown>"
+}
+
 func (s *Session) fetchIPBlocks(ctx context.Context) ([]NamedItem, error) {
-	blocks, _, err := s.Client.IPBlockAPI.GetAllIpblock(ctx, s.Org).Execute()
+	scopeSiteID := s.Scope.SiteID
+	blocks, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.IpBlock, *http.Response, error) {
+		req := s.Client.IPBlockAPI.GetAllIpblock(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +677,9 @@ func (s *Session) fetchIPBlocks(ctx context.Context) ([]NamedItem, error) {
 }
 
 func (s *Session) fetchNetworkSecurityGroups(ctx context.Context) ([]NamedItem, error) {
-	nsgs, _, err := s.Client.NetworkSecurityGroupAPI.GetAllNetworkSecurityGroup(ctx, s.Org).Execute()
+	nsgs, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.NetworkSecurityGroup, *http.Response, error) {
+		return s.Client.NetworkSecurityGroupAPI.GetAllNetworkSecurityGroup(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -413,18 +699,383 @@ func (s *Session) fetchNetworkSecurityGroups(ctx context.Context) ([]NamedItem, 
 	return items, nil
 }
 
+func (s *Session) fetchAudits(ctx context.Context) ([]NamedItem, error) {
+	entries, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.AuditEntry, *http.Response, error) {
+		return s.Client.AuditAPI.GetAllAuditEntry(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]NamedItem, len(entries))
+	for i, entry := range entries {
+		method := strings.TrimSpace(ptrStr(entry.Method))
+		endpoint := strings.TrimSpace(ptrStr(entry.Endpoint))
+		if method == "" {
+			method = "AUDIT"
+		}
+		status := ""
+		if entry.StatusCode != nil {
+			status = fmt.Sprintf("%d", *entry.StatusCode)
+		}
+		name := strings.TrimSpace(method + " " + endpoint)
+		if name == "" {
+			name = ptrStr(entry.Id)
+		}
+		items[i] = NamedItem{
+			Name:   name,
+			ID:     ptrStr(entry.Id),
+			Status: status,
+			Extra:  map[string]string{"method": method, "endpoint": endpoint},
+			Raw:    entry,
+		}
+	}
+	return items, nil
+}
+
+func (s *Session) fetchSSHKeys(ctx context.Context) ([]NamedItem, error) {
+	keys, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.SshKey, *http.Response, error) {
+		return s.Client.SSHKeyAPI.GetAllSshKey(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]NamedItem, len(keys))
+	for i, key := range keys {
+		items[i] = NamedItem{
+			Name:  ptrStr(key.Name),
+			ID:    ptrStr(key.Id),
+			Extra: map[string]string{"fingerprint": ptrStr(key.Fingerprint)},
+			Raw:   key,
+		}
+	}
+	return items, nil
+}
+
+func (s *Session) fetchSKUs(ctx context.Context) ([]NamedItem, error) {
+	skus, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Sku, *http.Response, error) {
+		return s.Client.SKUAPI.GetAllSku(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]NamedItem, len(skus))
+	for i, sku := range skus {
+		deviceType := ""
+		if sku.DeviceType.IsSet() {
+			deviceType = *sku.DeviceType.Get()
+		}
+		name := deviceType
+		if strings.TrimSpace(name) == "" {
+			name = ptrStr(sku.Id)
+		}
+		items[i] = NamedItem{
+			Name:  name,
+			ID:    ptrStr(sku.Id),
+			Extra: map[string]string{"siteId": ptrStr(sku.SiteId), "deviceType": deviceType},
+			Raw:   sku,
+		}
+	}
+	return items, nil
+}
+
+func (s *Session) fetchRacks(ctx context.Context) ([]NamedItem, error) {
+	racks, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Rack, *http.Response, error) {
+		return s.Client.RackAPI.GetAllRack(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]NamedItem, len(racks))
+	for i, rack := range racks {
+		items[i] = NamedItem{
+			Name: ptrStr(rack.Name),
+			ID:   ptrStr(rack.Id),
+			Extra: map[string]string{
+				"manufacturer": ptrStr(rack.Manufacturer),
+				"model":        ptrStr(rack.Model),
+			},
+			Raw: rack,
+		}
+	}
+	return items, nil
+}
+
+func (s *Session) fetchVPCPrefixes(ctx context.Context) ([]NamedItem, error) {
+	prefixes, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.VpcPrefix, *http.Response, error) {
+		return s.Client.VPCPrefixAPI.GetAllVpcPrefix(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]NamedItem, len(prefixes))
+	for i, prefix := range prefixes {
+		status := ""
+		if prefix.Status != nil {
+			status = string(*prefix.Status)
+		}
+		items[i] = NamedItem{
+			Name:   ptrStr(prefix.Name),
+			ID:     ptrStr(prefix.Id),
+			Status: status,
+			Extra:  map[string]string{"vpcId": ptrStr(prefix.VpcId)},
+			Raw:    prefix,
+		}
+	}
+	return items, nil
+}
+
+func (s *Session) fetchTenantAccounts(ctx context.Context) ([]NamedItem, error) {
+	accounts, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.TenantAccount, *http.Response, error) {
+		return s.Client.TenantAccountAPI.GetAllTenantAccount(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]NamedItem, len(accounts))
+	for i, account := range accounts {
+		status := ""
+		if account.Status != nil {
+			status = string(*account.Status)
+		}
+		tenantOrg := ""
+		if account.TenantOrg.IsSet() {
+			tenantOrg = *account.TenantOrg.Get()
+		}
+		name := strings.TrimSpace(tenantOrg)
+		if name == "" {
+			name = ptrStr(account.Id)
+		}
+		items[i] = NamedItem{
+			Name:   name,
+			ID:     ptrStr(account.Id),
+			Status: status,
+			Extra:  map[string]string{"infrastructureProviderId": ptrStr(account.InfrastructureProviderId)},
+			Raw:    account,
+		}
+	}
+	return items, nil
+}
+
+func (s *Session) fetchExpectedMachines(ctx context.Context) ([]NamedItem, error) {
+	machines, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.ExpectedMachine, *http.Response, error) {
+		return s.Client.ExpectedMachineAPI.GetAllExpectedMachine(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]NamedItem, len(machines))
+	for i, machine := range machines {
+		name := strings.TrimSpace(ptrStr(machine.BmcMacAddress))
+		if name == "" {
+			name = strings.TrimSpace(ptrStr(machine.ChassisSerialNumber))
+		}
+		if name == "" {
+			name = ptrStr(machine.Id)
+		}
+		items[i] = NamedItem{
+			Name: name,
+			ID:   ptrStr(machine.Id),
+			Extra: map[string]string{
+				"siteId":              ptrStr(machine.SiteId),
+				"bmcMacAddress":       ptrStr(machine.BmcMacAddress),
+				"chassisSerialNumber": ptrStr(machine.ChassisSerialNumber),
+			},
+			Raw: machine,
+		}
+	}
+	return items, nil
+}
+
+func (s *Session) fetchDPUExtensionServices(ctx context.Context) ([]NamedItem, error) {
+	services, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.DpuExtensionService, *http.Response, error) {
+		return s.Client.DPUExtensionServiceAPI.GetAllDpuExtensionService(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]NamedItem, len(services))
+	for i, svc := range services {
+		items[i] = NamedItem{
+			Name: ptrStr(svc.Name),
+			ID:   ptrStr(svc.Id),
+			Extra: map[string]string{
+				"siteId":      ptrStr(svc.SiteId),
+				"serviceType": ptrStr(svc.ServiceType),
+			},
+			Raw: svc,
+		}
+	}
+	return items, nil
+}
+
+func (s *Session) fetchInfiniBandPartitions(ctx context.Context) ([]NamedItem, error) {
+	partitions, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.InfiniBandPartition, *http.Response, error) {
+		return s.Client.InfiniBandPartitionAPI.GetAllInfinibandPartition(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]NamedItem, len(partitions))
+	for i, partition := range partitions {
+		status := ""
+		if partition.Status != nil {
+			status = string(*partition.Status)
+		}
+		items[i] = NamedItem{
+			Name:   ptrStr(partition.Name),
+			ID:     ptrStr(partition.Id),
+			Status: status,
+			Extra:  map[string]string{"siteId": ptrStr(partition.SiteId)},
+			Raw:    partition,
+		}
+	}
+	return items, nil
+}
+
+func (s *Session) fetchNVLinkLogicalPartitions(ctx context.Context) ([]NamedItem, error) {
+	partitions, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.NVLinkLogicalPartition, *http.Response, error) {
+		return s.Client.NVLinkLogicalPartitionAPI.GetAllNvlinkLogicalPartition(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]NamedItem, len(partitions))
+	for i, partition := range partitions {
+		status := ""
+		if partition.Status != nil {
+			status = string(*partition.Status)
+		}
+		items[i] = NamedItem{
+			Name:   ptrStr(partition.Name),
+			ID:     ptrStr(partition.Id),
+			Status: status,
+			Extra:  map[string]string{"siteId": ptrStr(partition.SiteId)},
+			Raw:    partition,
+		}
+	}
+	return items, nil
+}
+
+type vpcUsageCounts struct {
+	Instances int
+	Machines  int
+}
+
+func (s *Session) fetchVpcUsageCounts(ctx context.Context) (map[string]vpcUsageCounts, error) {
+	scopeSiteID := s.Scope.SiteID
+	instances, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Instance, *http.Response, error) {
+		req := s.Client.InstanceAPI.GetAllInstance(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	usageByVpc := make(map[string]vpcUsageCounts)
+	machineSetByVpc := make(map[string]map[string]struct{})
+	for _, inst := range instances {
+		vpcID := strings.TrimSpace(ptrStr(inst.VpcId))
+		if vpcID == "" {
+			continue
+		}
+		usage := usageByVpc[vpcID]
+		usage.Instances++
+		usageByVpc[vpcID] = usage
+
+		if machineID, ok := inst.GetMachineIdOk(); ok && machineID != nil {
+			id := strings.TrimSpace(*machineID)
+			if id != "" {
+				if machineSetByVpc[vpcID] == nil {
+					machineSetByVpc[vpcID] = make(map[string]struct{})
+				}
+				machineSetByVpc[vpcID][id] = struct{}{}
+			}
+		}
+	}
+
+	for vpcID, set := range machineSetByVpc {
+		usage := usageByVpc[vpcID]
+		usage.Machines = len(set)
+		usageByVpc[vpcID] = usage
+	}
+	return usageByVpc, nil
+}
+
 // -- Command logging --
 
 // LogCmd prints the equivalent CLI one-liner so users can copy/paste it
 func LogCmd(parts ...string) {
-	cmd := "bmmcli " + strings.Join(parts, " ")
-	fmt.Println(Dim("$ " + cmd))
+	logCmdWithScope(nil, parts...)
+}
+
+// LogScopedCmd prints the equivalent CLI command and includes active scope filters
+// when they map to supported CLI flags.
+func LogScopedCmd(s *Session, parts ...string) {
+	logCmdWithScope(s, parts...)
+}
+
+func logCmdWithScope(s *Session, parts ...string) {
+	cmdParts := []string{"bmmcli"}
+	if configPath := strings.TrimSpace(viper.ConfigFileUsed()); configPath != "" {
+		cmdParts = append(cmdParts, "--config", strconv.Quote(configPath))
+	}
+	cmdParts = append(cmdParts, appendScopeFlags(s, parts)...)
+	cmd := strings.Join(cmdParts, " ")
+	fmt.Printf("INFO: %s\n", cmd)
+}
+
+func appendScopeFlags(s *Session, parts []string) []string {
+	out := append([]string(nil), parts...)
+	if s == nil || len(parts) < 2 {
+		return out
+	}
+
+	resource := strings.TrimSpace(parts[0])
+	action := strings.TrimSpace(parts[1])
+	if action != "list" {
+		return out
+	}
+
+	scopeSiteID := strings.TrimSpace(s.Scope.SiteID)
+	scopeVpcID := strings.TrimSpace(s.Scope.VpcID)
+
+	switch resource {
+	case "vpc", "allocation", "ip-block":
+		if scopeSiteID != "" && !hasArgFlag(out, "--site-id") {
+			out = append(out, "--site-id", scopeSiteID)
+		}
+	case "subnet":
+		if scopeVpcID != "" && !hasArgFlag(out, "--vpc-id") {
+			out = append(out, "--vpc-id", scopeVpcID)
+		}
+	case "instance", "machine":
+		if scopeSiteID != "" && !hasArgFlag(out, "--site-id") {
+			out = append(out, "--site-id", scopeSiteID)
+		}
+		if scopeVpcID != "" && !hasArgFlag(out, "--vpc-id") {
+			out = append(out, "--vpc-id", scopeVpcID)
+		}
+	}
+
+	return out
+}
+
+func hasArgFlag(parts []string, flag string) bool {
+	for _, part := range parts {
+		if part == flag {
+			return true
+		}
+	}
+	return false
 }
 
 // -- Command handlers --
 
 func cmdSiteList(s *Session, args []string) error {
-	LogCmd("site", "list")
+	LogScopedCmd(s, "site", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "site")
 	if err != nil {
 		return err
@@ -433,16 +1084,32 @@ func cmdSiteList(s *Session, args []string) error {
 }
 
 func cmdVPCList(s *Session, args []string) error {
-	LogCmd("vpc", "list")
+	LogScopedCmd(s, "vpc", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "vpc")
 	if err != nil {
 		return err
 	}
+	siteNameByID := map[string]string{}
+	if sites, siteErr := s.Resolver.Fetch(s.Ctx, "site"); siteErr == nil {
+		for _, site := range sites {
+			siteNameByID[site.ID] = site.Name
+		}
+	}
+	usageByVpc, usageErr := s.fetchVpcUsageCounts(s.Ctx)
+	if usageErr != nil {
+		fmt.Printf("%s Could not load VPC usage counts: %v\n", Yellow("Note:"), usageErr)
+	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE\tID")
+	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE\tINSTANCES\tMACHINES\tID")
 	for _, item := range items {
-		siteName := s.Resolver.ResolveID("site", item.Extra["siteId"])
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Name, item.Status, siteName, item.ID)
+		siteID := item.Extra["siteId"]
+		siteName := strings.TrimSpace(siteNameByID[siteID])
+		if siteName == "" {
+			siteName = siteID
+		}
+		usage := usageByVpc[item.ID]
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\n", item.Name, item.Status, siteName, usage.Instances, usage.Machines, item.ID)
 	}
 	return tw.Flush()
 }
@@ -486,11 +1153,12 @@ func cmdVPCCreate(s *Session, args []string) error {
 }
 
 func cmdSubnetList(s *Session, args []string) error {
-	LogCmd("subnet", "list")
+	LogScopedCmd(s, "subnet", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "subnet")
 	if err != nil {
 		return err
 	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tSTATUS\tVPC\tID")
 	for _, item := range items {
@@ -543,11 +1211,12 @@ func cmdSubnetCreate(s *Session, args []string) error {
 }
 
 func cmdInstanceList(s *Session, args []string) error {
-	LogCmd("instance", "list")
+	LogScopedCmd(s, "instance", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "instance")
 	if err != nil {
 		return err
 	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tSTATUS\tVPC\tSITE\tID")
 	for _, item := range items {
@@ -568,11 +1237,12 @@ func cmdInstanceTypeList(s *Session, args []string) error {
 	if err != nil {
 		return err
 	}
-	LogCmd("instance-type", "list", "--site-id", site.ID)
+	LogScopedCmd(s, "instance-type", "list", "--site-id", site.ID)
 	items, err := s.fetchInstanceTypesBySite(s.Ctx, site.ID)
 	if err != nil {
 		return err
 	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE\tID")
 	for _, item := range items {
@@ -615,7 +1285,7 @@ func cmdInstanceTypeCreate(s *Session, args []string) error {
 }
 
 func cmdOSList(s *Session, args []string) error {
-	LogCmd("operating-system", "list")
+	LogScopedCmd(s, "operating-system", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "operating-system")
 	if err != nil {
 		return err
@@ -624,7 +1294,7 @@ func cmdOSList(s *Session, args []string) error {
 }
 
 func cmdSSHKeyGroupList(s *Session, args []string) error {
-	LogCmd("ssh-key-group", "list")
+	LogScopedCmd(s, "ssh-key-group", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "ssh-key-group")
 	if err != nil {
 		return err
@@ -633,11 +1303,12 @@ func cmdSSHKeyGroupList(s *Session, args []string) error {
 }
 
 func cmdAllocationList(s *Session, args []string) error {
-	LogCmd("allocation", "list")
+	LogScopedCmd(s, "allocation", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "allocation")
 	if err != nil {
 		return err
 	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE\tID")
 	for _, item := range items {
@@ -648,26 +1319,73 @@ func cmdAllocationList(s *Session, args []string) error {
 }
 
 func cmdMachineList(s *Session, args []string) error {
-	LogCmd("machine", "list")
+	LogScopedCmd(s, "machine", "list")
+	if s.Scope.VpcID != "" {
+		fmt.Printf("%s Showing machines attached to instances in scoped VPC.\n", Dim("Note:"))
+	}
+
 	items, err := s.Resolver.Fetch(s.Ctx, "machine")
+	if err != nil {
+		// Machine list for tenant orgs requires siteId. If missing, provide an interactive
+		// fallback so `machine list` still works and guide users toward scoped usage.
+		if s.Scope.SiteID == "" && strings.Contains(err.Error(), "400 Bad Request") {
+			if _, tenantErr := s.getTenantID(s.Ctx); tenantErr == nil {
+				fmt.Printf("%s Tenant org machine listing requires a site filter. Select a site.\n", Dim("Note:"))
+				site, resolveErr := s.Resolver.Resolve(s.Ctx, "site", "Site")
+				if resolveErr != nil {
+					return resolveErr
+				}
+				s.Scope.SiteID = site.ID
+				s.Scope.SiteName = site.Name
+				s.Cache.InvalidateFiltered()
+
+				items, err = s.fetchMachinesWithSiteID(s.Ctx, site.ID)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("%s Applied site scope %s (%s) for machine listing.\n", Dim("Note:"), site.Name, site.ID)
+			} else {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+
 	if err != nil {
 		return err
 	}
+
+	if s.Scope.VpcID != "" && len(items) == 0 {
+		fmt.Printf("%s No machines are currently attached to instances in this VPC.\n", Dim("Note:"))
+	}
+
+	vpcNamesByMachineID, vpcErr := s.machineVpcNamesByMachineID(s.Ctx)
+	if vpcErr != nil {
+		fmt.Printf("%s Could not load machine VPC names: %v\n", Yellow("Note:"), vpcErr)
+	}
+
+	pagination.PrintSummary(os.Stdout, nil, len(items))
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE\tID")
+	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE\tVPC\tID")
 	for _, item := range items {
 		siteName := s.Resolver.ResolveID("site", item.Extra["siteId"])
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Name, item.Status, siteName, item.ID)
+		vpcNames := strings.TrimSpace(vpcNamesByMachineID[item.ID])
+		if vpcNames == "" {
+			vpcNames = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", item.Name, item.Status, siteName, vpcNames, item.ID)
 	}
 	return tw.Flush()
 }
 
 func cmdIPBlockList(s *Session, args []string) error {
-	LogCmd("ip-block", "list")
+	LogScopedCmd(s, "ip-block", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "ip-block")
 	if err != nil {
 		return err
 	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE\tID")
 	for _, item := range items {
@@ -719,12 +1437,189 @@ func cmdIPBlockCreate(s *Session, args []string) error {
 }
 
 func cmdNSGList(s *Session, args []string) error {
-	LogCmd("network-security-group", "list")
+	LogScopedCmd(s, "network-security-group", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "network-security-group")
 	if err != nil {
 		return err
 	}
 	return printResourceTable(os.Stdout, "NAME", "STATUS", "ID", items)
+}
+
+func cmdSSHKeyList(s *Session, args []string) error {
+	LogCmd("ssh-key", "list")
+	items, err := s.Resolver.Fetch(s.Ctx, "ssh-key")
+	if err != nil {
+		return err
+	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tFINGERPRINT\tID")
+	for _, item := range items {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", item.Name, item.Extra["fingerprint"], item.ID)
+	}
+	return tw.Flush()
+}
+
+func cmdSKUList(s *Session, args []string) error {
+	LogCmd("sku", "list")
+	items, err := s.Resolver.Fetch(s.Ctx, "sku")
+	if err != nil {
+		return err
+	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "DEVICE TYPE\tSITE\tID")
+	for _, item := range items {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", item.Extra["deviceType"], item.Extra["siteId"], item.ID)
+	}
+	return tw.Flush()
+}
+
+func cmdRackList(s *Session, args []string) error {
+	LogCmd("rack", "list")
+	items, err := s.Resolver.Fetch(s.Ctx, "rack")
+	if err != nil {
+		return err
+	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tMANUFACTURER\tMODEL\tID")
+	for _, item := range items {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Name, item.Extra["manufacturer"], item.Extra["model"], item.ID)
+	}
+	return tw.Flush()
+}
+
+func cmdVPCPrefixList(s *Session, args []string) error {
+	LogCmd("vpc-prefix", "list")
+	items, err := s.Resolver.Fetch(s.Ctx, "vpc-prefix")
+	if err != nil {
+		return err
+	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tSTATUS\tVPC\tID")
+	for _, item := range items {
+		vpcName := s.Resolver.ResolveID("vpc", item.Extra["vpcId"])
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Name, item.Status, vpcName, item.ID)
+	}
+	return tw.Flush()
+}
+
+func cmdTenantAccountList(s *Session, args []string) error {
+	LogCmd("tenant-account", "list")
+	items, err := s.Resolver.Fetch(s.Ctx, "tenant-account")
+	if err != nil {
+		return err
+	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "TENANT ORG\tSTATUS\tINFRA PROVIDER ID\tID")
+	for _, item := range items {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Name, item.Status, item.Extra["infrastructureProviderId"], item.ID)
+	}
+	return tw.Flush()
+}
+
+func cmdExpectedMachineList(s *Session, args []string) error {
+	LogCmd("expected-machine", "list")
+	items, err := s.Resolver.Fetch(s.Ctx, "expected-machine")
+	if err != nil {
+		return err
+	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "SITE ID\tBMC MAC\tCHASSIS SN\tID")
+	for _, item := range items {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Extra["siteId"], item.Extra["bmcMacAddress"], item.Extra["chassisSerialNumber"], item.ID)
+	}
+	return tw.Flush()
+}
+
+func cmdDPUExtensionServiceList(s *Session, args []string) error {
+	LogCmd("dpu-extension-service", "list")
+	items, err := s.Resolver.Fetch(s.Ctx, "dpu-extension-service")
+	if err != nil {
+		return err
+	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tTYPE\tSITE ID\tID")
+	for _, item := range items {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Name, item.Extra["serviceType"], item.Extra["siteId"], item.ID)
+	}
+	return tw.Flush()
+}
+
+func cmdInfiniBandPartitionList(s *Session, args []string) error {
+	LogCmd("infiniband-partition", "list")
+	items, err := s.Resolver.Fetch(s.Ctx, "infiniband-partition")
+	if err != nil {
+		return err
+	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE ID\tID")
+	for _, item := range items {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Name, item.Status, item.Extra["siteId"], item.ID)
+	}
+	return tw.Flush()
+}
+
+func cmdNVLinkLogicalPartitionList(s *Session, args []string) error {
+	LogCmd("nvlink-logical-partition", "list")
+	items, err := s.Resolver.Fetch(s.Ctx, "nvlink-logical-partition")
+	if err != nil {
+		return err
+	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE ID\tID")
+	for _, item := range items {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Name, item.Status, item.Extra["siteId"], item.ID)
+	}
+	return tw.Flush()
+}
+
+func cmdAllocationConstraintList(s *Session, args []string) error {
+	allocation, err := s.Resolver.ResolveWithArgs(s.Ctx, "allocation", "Allocation", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("allocation-constraint", "list", "--allocation-id", allocation.ID)
+	constraints, _, err := s.Client.AllocationAPI.GetAllAllocationConstraint(s.Ctx, s.Org, allocation.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("listing allocation constraints: %w", err)
+	}
+	return printDetailJSON(os.Stdout, constraints)
+}
+
+func cmdAuditList(s *Session, args []string) error {
+	LogCmd("audit", "list")
+	items, err := s.Resolver.Fetch(s.Ctx, "audit")
+	if err != nil {
+		return err
+	}
+	pagination.PrintSummary(os.Stdout, nil, len(items))
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "METHOD\tENDPOINT\tSTATUS CODE\tID")
+	for _, item := range items {
+		method := strings.TrimSpace(item.Extra["method"])
+		if method == "" {
+			method = item.Name
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", method, item.Extra["endpoint"], item.Status, item.ID)
+	}
+	return tw.Flush()
+}
+
+func cmdMachineCapabilityList(s *Session, args []string) error {
+	LogCmd("machine-capability", "list")
+	caps, _, err := s.Client.MachineAPI.GetAllMachineCapabilities(s.Ctx, s.Org).Execute()
+	if err != nil {
+		return fmt.Errorf("listing machine capabilities: %w", err)
+	}
+	return printDetailJSON(os.Stdout, caps)
 }
 
 // -- Get/Details command handlers --
@@ -876,6 +1771,246 @@ func cmdNSGGet(s *Session, args []string) error {
 	result, _, err := s.Client.NetworkSecurityGroupAPI.GetNetworkSecurityGroup(s.Ctx, s.Org, nsg.ID).Execute()
 	if err != nil {
 		return fmt.Errorf("getting network security group: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdSSHKeyGet(s *Session, args []string) error {
+	key, err := s.Resolver.ResolveWithArgs(s.Ctx, "ssh-key", "SSH Key", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("ssh-key", "get", key.ID)
+	result, _, err := s.Client.SSHKeyAPI.GetSshKey(s.Ctx, s.Org, key.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting SSH key: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdSKUGet(s *Session, args []string) error {
+	sku, err := s.Resolver.ResolveWithArgs(s.Ctx, "sku", "SKU", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("sku", "get", sku.ID)
+	result, _, err := s.Client.SKUAPI.GetSku(s.Ctx, s.Org, sku.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting SKU: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdRackGet(s *Session, args []string) error {
+	rack, err := s.Resolver.ResolveWithArgs(s.Ctx, "rack", "Rack", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("rack", "get", rack.ID)
+	result, _, err := s.Client.RackAPI.GetRack(s.Ctx, s.Org, rack.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting rack: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdVPCPrefixGet(s *Session, args []string) error {
+	prefix, err := s.Resolver.ResolveWithArgs(s.Ctx, "vpc-prefix", "VPC Prefix", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("vpc-prefix", "get", prefix.ID)
+	result, _, err := s.Client.VPCPrefixAPI.GetVpcPrefix(s.Ctx, s.Org, prefix.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting VPC prefix: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdTenantAccountGet(s *Session, args []string) error {
+	account, err := s.Resolver.ResolveWithArgs(s.Ctx, "tenant-account", "Tenant Account", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("tenant-account", "get", account.ID)
+	result, _, err := s.Client.TenantAccountAPI.GetTenantAccount(s.Ctx, s.Org, account.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting tenant account: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdExpectedMachineGet(s *Session, args []string) error {
+	machine, err := s.Resolver.ResolveWithArgs(s.Ctx, "expected-machine", "Expected Machine", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("expected-machine", "get", machine.ID)
+	result, _, err := s.Client.ExpectedMachineAPI.GetExpectedMachine(s.Ctx, s.Org, machine.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting expected machine: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdDPUExtensionServiceGet(s *Session, args []string) error {
+	service, err := s.Resolver.ResolveWithArgs(s.Ctx, "dpu-extension-service", "DPU Extension Service", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("dpu-extension-service", "get", service.ID)
+	result, _, err := s.Client.DPUExtensionServiceAPI.GetDpuExtensionService(s.Ctx, s.Org, service.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting DPU extension service: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdInfiniBandPartitionGet(s *Session, args []string) error {
+	partition, err := s.Resolver.ResolveWithArgs(s.Ctx, "infiniband-partition", "InfiniBand Partition", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("infiniband-partition", "get", partition.ID)
+	result, _, err := s.Client.InfiniBandPartitionAPI.GetInfinibandPartition(s.Ctx, s.Org, partition.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting InfiniBand partition: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdNVLinkLogicalPartitionGet(s *Session, args []string) error {
+	partition, err := s.Resolver.ResolveWithArgs(s.Ctx, "nvlink-logical-partition", "NVLink Logical Partition", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("nvlink-logical-partition", "get", partition.ID)
+	result, _, err := s.Client.NVLinkLogicalPartitionAPI.GetNvlinkLogicalPartition(s.Ctx, s.Org, partition.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting NVLink logical partition: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdAllocationConstraintGet(s *Session, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: allocation-constraint get <allocation-id-or-name> [constraint-id]")
+	}
+	allocation, err := s.Resolver.ResolveWithArgs(s.Ctx, "allocation", "Allocation", args[:1])
+	if err != nil {
+		return err
+	}
+
+	constraintID := ""
+	if len(args) > 1 {
+		constraintID = strings.TrimSpace(args[1])
+	}
+	if constraintID == "" {
+		constraints, _, err := s.Client.AllocationAPI.GetAllAllocationConstraint(s.Ctx, s.Org, allocation.ID).Execute()
+		if err != nil {
+			return fmt.Errorf("listing allocation constraints: %w", err)
+		}
+		if len(constraints) == 0 {
+			return fmt.Errorf("no allocation constraints found for allocation %s", allocation.ID)
+		}
+		items := make([]NamedItem, 0, len(constraints))
+		for _, constraint := range constraints {
+			id := strings.TrimSpace(ptrStr(constraint.Id))
+			if id == "" {
+				continue
+			}
+			items = append(items, NamedItem{Name: id, ID: id, Raw: constraint})
+		}
+		if len(items) == 0 {
+			return fmt.Errorf("allocation constraints did not include IDs for allocation %s", allocation.ID)
+		}
+		selected, err := s.Resolver.SelectFromItems("Allocation Constraint", items)
+		if err != nil {
+			return err
+		}
+		constraintID = selected.ID
+	}
+
+	LogCmd("allocation-constraint", "get", constraintID, "--allocation-id", allocation.ID)
+	result, _, err := s.Client.AllocationAPI.GetAllocationConstraint(s.Ctx, s.Org, allocation.ID, constraintID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting allocation constraint: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdAuditGet(s *Session, args []string) error {
+	entry, err := s.Resolver.ResolveWithArgs(s.Ctx, "audit", "Audit Entry", args)
+	if err != nil {
+		return err
+	}
+	LogCmd("audit", "get", entry.ID)
+	result, _, err := s.Client.AuditAPI.GetAuditEntry(s.Ctx, s.Org, entry.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("getting audit entry: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdMetadataGet(s *Session, args []string) error {
+	LogCmd("metadata", "get")
+	result, _, err := s.Client.MetadataAPI.GetMetadata(s.Ctx, s.Org).Execute()
+	if err != nil {
+		return fmt.Errorf("getting metadata: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdUserCurrent(s *Session, args []string) error {
+	LogCmd("user", "current")
+	result, _, err := s.Client.UserAPI.GetUser(s.Ctx, s.Org).Execute()
+	if err != nil {
+		return fmt.Errorf("getting current user: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdServiceAccountCurrent(s *Session, args []string) error {
+	LogCmd("service-account", "current")
+	result, _, err := s.Client.ServiceAccountAPI.GetCurrentServiceAccount(s.Ctx, s.Org).Execute()
+	if err != nil {
+		return fmt.Errorf("getting current service account: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdInfrastructureProviderCurrent(s *Session, args []string) error {
+	LogCmd("infrastructure-provider", "current")
+	result, _, err := s.Client.InfrastructureProviderAPI.GetCurrentInfrastructureProvider(s.Ctx, s.Org).Execute()
+	if err != nil {
+		return fmt.Errorf("getting current infrastructure provider: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdInfrastructureProviderStats(s *Session, args []string) error {
+	LogCmd("infrastructure-provider", "stats")
+	result, _, err := s.Client.InfrastructureProviderAPI.GetCurrentInfrastructureProviderStats(s.Ctx, s.Org).Execute()
+	if err != nil {
+		return fmt.Errorf("getting infrastructure provider stats: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdTenantCurrent(s *Session, args []string) error {
+	LogCmd("tenant", "current")
+	result, _, err := s.Client.TenantAPI.GetCurrentTenant(s.Ctx, s.Org).Execute()
+	if err != nil {
+		return fmt.Errorf("getting current tenant: %w", err)
+	}
+	return printDetailJSON(os.Stdout, result)
+}
+
+func cmdTenantStats(s *Session, args []string) error {
+	LogCmd("tenant", "stats")
+	result, _, err := s.Client.TenantAPI.GetCurrentTenantStats(s.Ctx, s.Org).Execute()
+	if err != nil {
+		return fmt.Errorf("getting tenant stats: %w", err)
 	}
 	return printDetailJSON(os.Stdout, result)
 }
@@ -1044,6 +2179,13 @@ func cmdHelp(s *Session, args []string) error {
 	for _, cmd := range AllCommands() {
 		fmt.Fprintf(tw, "%s\t%s\n", cmd.Name, cmd.Description)
 	}
+	fmt.Fprintln(tw, "org\tShow current org")
+	fmt.Fprintln(tw, "org list\tList available orgs")
+	fmt.Fprintln(tw, "org set <name>\tSwitch to a different org")
+	fmt.Fprintln(tw, "scope\tShow current scope filters")
+	fmt.Fprintln(tw, "scope site [name]\tSet site scope (filters lists)")
+	fmt.Fprintln(tw, "scope vpc [name]\tSet VPC scope (filters lists)")
+	fmt.Fprintln(tw, "scope clear\tClear all scope filters")
 	fmt.Fprintln(tw, "exit\tExit interactive mode")
 	tw.Flush()
 	fmt.Println()
@@ -1061,7 +2203,13 @@ func printDetailJSON(w io.Writer, v interface{}) error {
 	return nil
 }
 
+// NewTabWriter creates a standard tabwriter for table output.
+func NewTabWriter(w io.Writer) *tabwriter.Writer {
+	return tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
+}
+
 func printResourceTable(w io.Writer, col1, col2, col3 string, items []NamedItem) error {
+	pagination.PrintSummary(w, nil, len(items))
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 	fmt.Fprintf(tw, "%s\t%s\t%s\n", col1, col2, col3)
 	for _, item := range items {

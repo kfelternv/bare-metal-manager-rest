@@ -18,36 +18,127 @@ import (
 	"golang.org/x/term"
 )
 
-// tokenResponse represents an OIDC token endpoint response
-type tokenResponse struct {
+// oidcTokenResponse represents an OIDC token endpoint response
+type oidcTokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
 }
 
+// ngcTokenResponse represents the NGC authn token exchange response
+type ngcTokenResponse struct {
+	Token string `json:"token"`
+}
+
 var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Authenticate with the Carbide API",
-	Long:  "Authenticate with the API using an OIDC provider and save the token to config.",
-	RunE:  runLogin,
+	Long: `Authenticate and save a session token to config.
+
+Login auto-detects the configured auth method:
+  - If auth.oidc is configured, uses OIDC password flow (default).
+  - If auth.api_key is configured, exchanges the NGC API key.
+  - If both are configured, defaults to OIDC. Use --api-key to force NGC.
+
+Examples:
+  bmm login                  # auto-detect (prefers OIDC)
+  bmm login --api-key        # force NGC API key exchange`,
+	RunE: runLogin,
 }
 
 func init() {
-	loginCmd.Flags().String("username", "", "username for authentication")
-	loginCmd.Flags().String("password", "", "password for authentication")
+	loginCmd.Flags().String("username", "", "username for OIDC authentication")
+	loginCmd.Flags().String("password", "", "password for OIDC authentication")
+	loginCmd.Flags().Bool("api-key", false, "force NGC API key exchange instead of OIDC")
 	rootCmd.AddCommand(loginCmd)
 }
 
 func runLogin(cmd *cobra.Command, args []string) error {
-	if !hasAuthProviderConfig() {
-		return fmt.Errorf(authGuidance, configFilePath())
+	forceAPIKey, _ := cmd.Flags().GetBool("api-key")
+
+	if forceAPIKey {
+		if !hasAPIKeyConfig() {
+			return fmt.Errorf("auth.api_key is not configured in %s\n\n"+
+				"Add:\n"+
+				"  auth:\n"+
+				"    api_key:\n"+
+				"      authn_url: https://authn.nvidia.com/token\n"+
+				"      key: nvapi-xxxx", configFilePath())
+		}
+		return loginWithAPIKey()
 	}
 
+	// Auto-detect: prefer OIDC, fall back to API key
+	if hasOIDCConfig() {
+		return loginWithOIDC(cmd)
+	}
+	if hasAPIKeyConfig() {
+		return loginWithAPIKey()
+	}
+
+	return fmt.Errorf(authGuidance, configFilePath())
+}
+
+func loginWithAPIKey() error {
+	authnURL := viper.GetString("auth.api_key.authn_url")
+	apiKey := viper.GetString("auth.api_key.key")
+
+	req, err := http.NewRequest("GET", authnURL, nil)
+	if err != nil {
+		return fmt.Errorf("building request: %w", err)
+	}
+	req.Header.Set("Authorization", "ApiKey "+apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("requesting token from NGC: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("reading response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("NGC token exchange failed (HTTP %d): %s\nURL: %s", resp.StatusCode, string(body), authnURL)
+	}
+
+	token := extractToken(body)
+	if token == "" {
+		return fmt.Errorf("NGC authn response did not contain a token: %s", string(body))
+	}
+
+	viper.Set("auth.api_key.token", token)
+	if err := saveToken("api_key", token); err != nil {
+		return fmt.Errorf("saving token: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Login successful (NGC API key). Token saved to %s\n", configFilePath())
+	return nil
+}
+
+// extractToken tries multiple JSON response formats to find the token.
+func extractToken(body []byte) string {
+	// Try {"token": "..."}
+	var ngcResp ngcTokenResponse
+	if err := json.Unmarshal(body, &ngcResp); err == nil && ngcResp.Token != "" {
+		return ngcResp.Token
+	}
+	// Try {"access_token": "..."} (OIDC-style)
+	var oidcResp oidcTokenResponse
+	if err := json.Unmarshal(body, &oidcResp); err == nil && oidcResp.AccessToken != "" {
+		return oidcResp.AccessToken
+	}
+	return ""
+}
+
+func loginWithOIDC(cmd *cobra.Command) error {
 	username, _ := cmd.Flags().GetString("username")
 	password, _ := cmd.Flags().GetString("password")
 
-	// Fall back to config values
 	if username == "" {
 		username = viper.GetString("auth.oidc.username")
 	}
@@ -55,20 +146,18 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		password = viper.GetString("auth.oidc.password")
 	}
 
-	// Prompt for username if still empty
 	if username == "" {
 		fmt.Print("Username: ")
 		fmt.Scanln(&username)
 	}
 
-	// Prompt for password if still empty (hidden input)
 	if password == "" {
 		fmt.Print("Password: ")
 		passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
 		if err != nil {
 			return fmt.Errorf("reading password: %w", err)
 		}
-		fmt.Println() // newline after hidden input
+		fmt.Println()
 		password = string(passwordBytes)
 	}
 
@@ -99,19 +188,16 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("authentication failed (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 
-	var tokenResp tokenResponse
+	var tokenResp oidcTokenResponse
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
 		return fmt.Errorf("parsing token response: %w", err)
 	}
 
-	// Save tokens to config
-	viper.Set("auth.token", tokenResp.AccessToken)
-	viper.Set("auth.refresh_token", tokenResp.RefreshToken)
-
-	if err := saveConfig(); err != nil {
-		return fmt.Errorf("saving config: %w", err)
+	viper.Set("auth.oidc.token", tokenResp.AccessToken)
+	if err := saveToken("oidc", tokenResp.AccessToken); err != nil {
+		return fmt.Errorf("saving token: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Login successful. Token saved to %s\n", configFilePath())
+	fmt.Fprintf(os.Stderr, "Login successful (OIDC). Token saved to %s\n", configFilePath())
 	return nil
 }

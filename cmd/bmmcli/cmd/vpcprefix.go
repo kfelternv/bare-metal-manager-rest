@@ -6,11 +6,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -87,7 +89,9 @@ func runVpcPrefixList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	prefixes, resp, err := apiClient.VPCPrefixAPI.GetAllVpcPrefix(ctx, org).Execute()
+	prefixes, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.VpcPrefix, *http.Response, error) {
+		return apiClient.VPCPrefixAPI.GetAllVpcPrefix(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -95,6 +99,7 @@ func runVpcPrefixList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing VPC prefixes: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(prefixes))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

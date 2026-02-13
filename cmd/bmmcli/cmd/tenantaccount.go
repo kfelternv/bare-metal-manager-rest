@@ -6,11 +6,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -73,7 +75,9 @@ func runTenantAccountList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	accounts, resp, err := apiClient.TenantAccountAPI.GetAllTenantAccount(ctx, org).Execute()
+	accounts, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.TenantAccount, *http.Response, error) {
+		return apiClient.TenantAccountAPI.GetAllTenantAccount(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -81,6 +85,7 @@ func runTenantAccountList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing tenant accounts: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(accounts))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

@@ -6,11 +6,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -55,6 +57,7 @@ var allocationDeleteCmd = &cobra.Command{
 
 func init() {
 	allocationListCmd.Flags().Bool("json", false, "output raw JSON")
+	allocationListCmd.Flags().String("site-id", "", "filter by site ID")
 
 	allocationCreateCmd.Flags().String("name", "", "name for the allocation (required)")
 	allocationCreateCmd.Flags().String("site-id", "", "site ID (required)")
@@ -86,8 +89,15 @@ func runAllocationList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 
-	allocs, resp, err := apiClient.AllocationAPI.GetAllAllocation(ctx, org).Execute()
+	allocs, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Allocation, *http.Response, error) {
+		req := apiClient.AllocationAPI.GetAllAllocation(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -95,6 +105,7 @@ func runAllocationList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing allocations: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(allocs))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

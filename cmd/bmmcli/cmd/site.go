@@ -8,15 +8,75 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"regexp"
+	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
+
+var orgScopedAPIPathPattern = regexp.MustCompile(`(/v[0-9]+/org/[^/]+/)[^/]+`)
+
+type apiNameRewriteTransport struct {
+	apiName string
+	next    http.RoundTripper
+}
+
+func (t *apiNameRewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	transport := t.next
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+
+	cleanedName := strings.Trim(strings.TrimSpace(t.apiName), "/")
+	if cleanedName == "" || req == nil || req.URL == nil {
+		return transport.RoundTrip(req)
+	}
+
+	rewrittenPath := rewriteAPINamePath(req.URL.Path, cleanedName)
+	rewrittenRawPath := req.URL.RawPath
+	if req.URL.RawPath != "" {
+		rewrittenRawPath = rewriteAPINamePath(req.URL.RawPath, cleanedName)
+	}
+
+	if rewrittenPath == req.URL.Path && rewrittenRawPath == req.URL.RawPath {
+		return transport.RoundTrip(req)
+	}
+
+	clonedReq := req.Clone(req.Context())
+	clonedURL := *req.URL
+	clonedReq.URL = &clonedURL
+	clonedReq.URL.Path = rewrittenPath
+	if req.URL.RawPath != "" {
+		clonedReq.URL.RawPath = rewrittenRawPath
+	}
+	clonedReq.RequestURI = ""
+
+	return transport.RoundTrip(clonedReq)
+}
+
+func rewriteAPINamePath(path, apiName string) string {
+	if path == "" || apiName == "" {
+		return path
+	}
+	return orgScopedAPIPathPattern.ReplaceAllString(path, "${1}"+apiName)
+}
+
+func newConfiguredHTTPClient(apiName string) *http.Client {
+	httpClient := *http.DefaultClient
+	httpClient.Transport = &apiNameRewriteTransport{
+		apiName: apiName,
+		next:    http.DefaultTransport,
+	}
+	return &httpClient
+}
 
 var siteCmd = &cobra.Command{
 	Use:   "site",
@@ -82,6 +142,7 @@ func newAPIClient() *client.APIClient {
 			Description: "Configured server",
 		},
 	}
+	cfg.HTTPClient = newConfiguredHTTPClient(viper.GetString("api.name"))
 	return client.NewAPIClient(cfg)
 }
 
@@ -106,13 +167,16 @@ func runSiteList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	sites, resp, err := apiClient.SiteAPI.GetAllSite(ctx, org).Execute()
+	sites, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Site, *http.Response, error) {
+		return apiClient.SiteAPI.GetAllSite(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			return fmt.Errorf("listing sites (HTTP %d): %v", resp.StatusCode, err)
 		}
 		return fmt.Errorf("listing sites: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(sites))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

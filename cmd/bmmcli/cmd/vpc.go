@@ -4,13 +4,17 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -55,6 +59,7 @@ var vpcDeleteCmd = &cobra.Command{
 
 func init() {
 	vpcListCmd.Flags().Bool("json", false, "output raw JSON")
+	vpcListCmd.Flags().String("site-id", "", "filter by site ID")
 
 	vpcCreateCmd.Flags().String("name", "", "name for the VPC (required)")
 	vpcCreateCmd.Flags().String("site-id", "", "site ID where the VPC should be created (required)")
@@ -84,14 +89,30 @@ func runVpcList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 
-	vpcs, resp, err := apiClient.VPCAPI.GetAllVpc(ctx, org).Execute()
+	vpcs, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.VPC, *http.Response, error) {
+		req := apiClient.VPCAPI.GetAllVpc(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
 			return fmt.Errorf("listing VPCs (HTTP %d): %v\n%s", resp.StatusCode, err, body)
 		}
 		return fmt.Errorf("listing VPCs: %v", err)
+	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(vpcs))
+	usageByVpc, usageErr := fetchVpcUsageCounts(apiClient, ctx, org, siteID)
+	if usageErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Note: could not load VPC usage counts: %v\n", usageErr)
+	}
+	siteNamesByID, siteErr := fetchSiteNamesByID(apiClient, ctx, org)
+	if siteErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Note: could not load site names: %v\n", siteErr)
 	}
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
@@ -102,7 +123,7 @@ func runVpcList(cmd *cobra.Command, args []string) error {
 	case outputFlag == "yaml":
 		return printYAML(os.Stdout, vpcs)
 	default:
-		return printVpcTable(os.Stdout, vpcs)
+		return printVpcTable(os.Stdout, vpcs, usageByVpc, siteNamesByID)
 	}
 }
 
@@ -235,18 +256,89 @@ func runVpcCreate(cmd *cobra.Command, args []string) error {
 		return printYAML(os.Stdout, vpc)
 	default:
 		fmt.Fprintf(os.Stderr, "VPC created: %s (%s)\n", ptrStr(vpc.Name), ptrStr(vpc.Id))
-		return printVpcTable(os.Stdout, []client.VPC{*vpc})
+		return printVpcTable(os.Stdout, []client.VPC{*vpc}, nil, nil)
 	}
 }
 
-func printVpcTable(w io.Writer, vpcs []client.VPC) error {
+type vpcUsageCounts struct {
+	Instances int
+	Machines  int
+}
+
+func fetchVpcUsageCounts(apiClient *client.APIClient, ctx context.Context, org, siteID string) (map[string]vpcUsageCounts, error) {
+	instances, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Instance, *http.Response, error) {
+		req := apiClient.InstanceAPI.GetAllInstance(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	usageByVpc := make(map[string]vpcUsageCounts)
+	machineSetByVpc := make(map[string]map[string]struct{})
+	for _, inst := range instances {
+		vpcID := strings.TrimSpace(ptrStr(inst.VpcId))
+		if vpcID == "" {
+			continue
+		}
+
+		usage := usageByVpc[vpcID]
+		usage.Instances++
+		usageByVpc[vpcID] = usage
+
+		if machineID, ok := inst.GetMachineIdOk(); ok && machineID != nil {
+			id := strings.TrimSpace(*machineID)
+			if id != "" {
+				if machineSetByVpc[vpcID] == nil {
+					machineSetByVpc[vpcID] = make(map[string]struct{})
+				}
+				machineSetByVpc[vpcID][id] = struct{}{}
+			}
+		}
+	}
+
+	for vpcID, set := range machineSetByVpc {
+		usage := usageByVpc[vpcID]
+		usage.Machines = len(set)
+		usageByVpc[vpcID] = usage
+	}
+	return usageByVpc, nil
+}
+
+func fetchSiteNamesByID(apiClient *client.APIClient, ctx context.Context, org string) (map[string]string, error) {
+	sites, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Site, *http.Response, error) {
+		return apiClient.SiteAPI.GetAllSite(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	siteNamesByID := make(map[string]string, len(sites))
+	for _, s := range sites {
+		id := strings.TrimSpace(ptrStr(s.Id))
+		if id == "" {
+			continue
+		}
+		siteNamesByID[id] = strings.TrimSpace(ptrStr(s.Name))
+	}
+	return siteNamesByID, nil
+}
+
+func printVpcTable(w io.Writer, vpcs []client.VPC, usageByVpc map[string]vpcUsageCounts, siteNamesByID map[string]string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE ID\tAGE\tID")
+	fmt.Fprintln(tw, "NAME\tSTATUS\tSITE\tINSTANCES\tMACHINES\tAGE\tID")
 
 	for _, v := range vpcs {
 		name := ptrStr(v.Name)
 		id := ptrStr(v.Id)
 		siteID := ptrStr(v.SiteId)
+		siteName := strings.TrimSpace(siteNamesByID[siteID])
+		if siteName == "" {
+			siteName = siteID
+		}
 		status := ""
 		if v.Status != nil {
 			status = string(*v.Status)
@@ -256,7 +348,8 @@ func printVpcTable(w io.Writer, vpcs []client.VPC) error {
 			age = formatAge(time.Since(*v.Created))
 		}
 
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", name, status, siteID, age, id)
+		usage := usageByVpc[id]
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%s\n", name, status, siteName, usage.Instances, usage.Machines, age, id)
 	}
 
 	return tw.Flush()

@@ -6,11 +6,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -87,15 +89,19 @@ func runInstanceTypeList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	req := apiClient.InstanceTypeAPI.GetAllInstanceType(ctx, org)
-	if siteID, _ := cmd.Flags().GetString("site-id"); siteID != "" {
-		req = req.SiteId(siteID)
-	}
-	if tenantID, _ := cmd.Flags().GetString("tenant-id"); tenantID != "" {
-		req = req.TenantId(tenantID)
-	}
+	siteID, _ := cmd.Flags().GetString("site-id")
+	tenantID, _ := cmd.Flags().GetString("tenant-id")
 
-	types, resp, err := req.Execute()
+	types, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.InstanceType, *http.Response, error) {
+		req := apiClient.InstanceTypeAPI.GetAllInstanceType(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		if tenantID != "" {
+			req = req.TenantId(tenantID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -103,6 +109,7 @@ func runInstanceTypeList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing instance types: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(types))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

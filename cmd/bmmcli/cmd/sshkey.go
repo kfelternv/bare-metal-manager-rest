@@ -6,11 +6,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -83,7 +85,9 @@ func runSSHKeyList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	keys, resp, err := apiClient.SSHKeyAPI.GetAllSshKey(ctx, org).Execute()
+	keys, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.SshKey, *http.Response, error) {
+		return apiClient.SSHKeyAPI.GetAllSshKey(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -91,6 +95,7 @@ func runSSHKeyList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing SSH keys: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(keys))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

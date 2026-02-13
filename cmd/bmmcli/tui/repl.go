@@ -4,12 +4,15 @@
 package tui
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 )
 
 const maxSuggestions = 6
+const maxHistory = 100
 
 // argResourceMap maps command names to the resource type whose names should
 // be offered as argument completions. Only commands that accept a resource
@@ -25,13 +28,29 @@ var argResourceMap = map[string]string{
 	"instance delete":              "instance",
 	"allocation get":               "allocation",
 	"allocation delete":            "allocation",
+	"allocation-constraint list":   "allocation",
+	"allocation-constraint get":    "allocation",
+	"audit get":                    "audit",
 	"machine get":                  "machine",
 	"ip-block get":                 "ip-block",
 	"ip-block delete":              "ip-block",
 	"operating-system get":         "operating-system",
 	"ssh-key-group get":            "ssh-key-group",
+	"ssh-key get":                  "ssh-key",
+	"sku get":                      "sku",
+	"rack get":                     "rack",
+	"vpc-prefix get":               "vpc-prefix",
+	"tenant-account get":           "tenant-account",
+	"expected-machine get":         "expected-machine",
+	"dpu-extension-service get":    "dpu-extension-service",
+	"infiniband-partition get":     "infiniband-partition",
+	"nvlink-logical-partition get": "nvlink-logical-partition",
 	"network-security-group get":   "network-security-group",
 }
+
+// history holds the command history for the REPL session.
+var history []string
+var historyPos int // current position when browsing; -1 = not browsing
 
 // RunREPL starts the interactive REPL loop with inline autocomplete
 func RunREPL(s *Session) error {
@@ -42,8 +61,10 @@ func RunREPL(s *Session) error {
 		cmdNames[i] = cmd.Name
 		cmdMap[cmd.Name] = cmd
 	}
-	// Add exit/quit to suggestions but not cmdMap
-	cmdNames = append(cmdNames, "exit", "quit")
+	// Add session commands to suggestions but not cmdMap
+	cmdNames = append(cmdNames, "org", "org list", "org set",
+		"scope", "scope site", "scope vpc", "scope clear",
+		"exit", "quit")
 
 	fmt.Printf("\n%s\n", Bold("BMM Interactive Mode"))
 	fmt.Printf("Org: %s\n", Cyan(s.Org))
@@ -52,7 +73,6 @@ func RunREPL(s *Session) error {
 	for {
 		line, err := readLineWithSuggestions(s, cmdNames)
 		if err != nil {
-			// Ctrl+D or read error
 			fmt.Println("\nGoodbye.")
 			return nil
 		}
@@ -62,9 +82,70 @@ func RunREPL(s *Session) error {
 			continue
 		}
 
+		// Add to history
+		if len(history) == 0 || history[len(history)-1] != line {
+			history = append(history, line)
+			if len(history) > maxHistory {
+				history = history[1:]
+			}
+		}
+
 		if line == "exit" || line == "quit" {
 			fmt.Println("Goodbye.")
 			return nil
+		}
+
+		// Handle org commands inline (they modify session state)
+		if line == "org" {
+			fmt.Printf("Current org: %s\n\n", Cyan(s.Org))
+			continue
+		}
+		if line == "org list" {
+			runOrgList(s)
+			fmt.Println()
+			continue
+		}
+		if strings.HasPrefix(line, "org set ") {
+			newOrg := strings.TrimSpace(line[len("org set "):])
+			if newOrg != "" {
+				s.Org = newOrg
+				s.Cache.InvalidateAll()
+				fmt.Printf("Org set to: %s\n\n", Cyan(s.Org))
+			} else {
+				fmt.Fprintf(os.Stderr, "%s org name required\n\n", Red("Error:"))
+			}
+			continue
+		}
+
+		// Handle scope commands
+		if line == "scope" {
+			if s.Scope.SiteID == "" && s.Scope.VpcID == "" {
+				fmt.Println("No scope set. All list commands return unfiltered results.")
+			} else {
+				if s.Scope.SiteName != "" {
+					fmt.Printf("  site: %s (%s)\n", Cyan(s.Scope.SiteName), s.Scope.SiteID)
+				}
+				if s.Scope.VpcName != "" {
+					fmt.Printf("  vpc:  %s (%s)\n", Cyan(s.Scope.VpcName), s.Scope.VpcID)
+				}
+			}
+			fmt.Println()
+			continue
+		}
+		if line == "scope clear" {
+			s.Scope = Scope{}
+			s.Cache.InvalidateFiltered()
+			fmt.Println("Scope cleared.")
+			fmt.Println()
+			continue
+		}
+		if line == "scope site" || strings.HasPrefix(line, "scope site ") {
+			runScopeSet(s, "site", strings.TrimSpace(strings.TrimPrefix(line, "scope site")))
+			continue
+		}
+		if line == "scope vpc" || strings.HasPrefix(line, "scope vpc ") {
+			runScopeSet(s, "vpc", strings.TrimSpace(strings.TrimPrefix(line, "scope vpc")))
+			continue
 		}
 
 		// Try exact match first
@@ -102,9 +183,8 @@ func RunREPL(s *Session) error {
 }
 
 // readLineWithSuggestions reads a line in raw mode, showing matching suggestions
-// below the input as the user types. It suggests command names first, and once
-// the user has typed a complete command that accepts a resource argument (like
-// "site get "), it switches to suggesting resource names from the cache.
+// below the input as the user types. Supports command history via up/down arrows
+// when no suggestions are displayed.
 func readLineWithSuggestions(s *Session, cmdNames []string) (string, error) {
 	restore, err := RawMode()
 	if err != nil {
@@ -115,8 +195,10 @@ func readLineWithSuggestions(s *Session, cmdNames []string) (string, error) {
 		ShowCursor()
 	}()
 
-	prompt := Cyan("bmm:"+s.Org) + "> "
+	prompt := s.PromptString()
 	line := ""
+	savedLine := ""          // line before entering history browsing
+	historyPos = -1          // not browsing history
 	selectedSuggestion := -1 // -1 = no suggestion selected
 	prevSuggestionCount := 0
 
@@ -130,19 +212,15 @@ func readLineWithSuggestions(s *Session, cmdNames []string) (string, error) {
 			suggestions = suggestions[:maxSuggestions]
 		}
 
-		// Clear previous suggestions
 		clearSuggestionLines(prevSuggestionCount)
 
-		// Redraw the prompt line
 		ClearLine()
 		fmt.Print("\r" + prompt + line)
 
-		// Clamp selected suggestion
 		if selectedSuggestion >= len(suggestions) {
 			selectedSuggestion = len(suggestions) - 1
 		}
 
-		// Draw suggestions below
 		if len(line) > 0 && len(suggestions) > 0 {
 			for i, sg := range suggestions {
 				fmt.Print("\r\n")
@@ -153,9 +231,7 @@ func readLineWithSuggestions(s *Session, cmdNames []string) (string, error) {
 					fmt.Print("  " + Dim(sg))
 				}
 			}
-			// Move cursor back up to the input line
 			MoveUp(len(suggestions))
-			// Position cursor at end of input
 			MoveToColumn(len(stripAnsi(prompt)) + len(line) + 1)
 		}
 
@@ -176,9 +252,9 @@ func readLineWithSuggestions(s *Session, cmdNames []string) (string, error) {
 
 		switch {
 		case key.Char == KeyCtrlC:
-			// Clear and start over
 			line = ""
 			selectedSuggestion = -1
+			historyPos = -1
 			clearSuggestionLines(prevSuggestionCount)
 			prevSuggestionCount = 0
 			renderInput()
@@ -193,24 +269,23 @@ func readLineWithSuggestions(s *Session, cmdNames []string) (string, error) {
 				suggestions = suggestions[:maxSuggestions]
 			}
 
-			// If a suggestion is selected, accept it
 			if selectedSuggestion >= 0 && selectedSuggestion < len(suggestions) {
 				line = suggestions[selectedSuggestion]
 				selectedSuggestion = -1
+				historyPos = -1
 				clearSuggestionLines(prevSuggestionCount)
 				prevSuggestionCount = 0
 				renderInput()
 				continue
 			}
 
-			// Otherwise execute the line
 			clearSuggestionLines(prevSuggestionCount)
 			ClearLine()
 			fmt.Print("\r" + prompt + line + "\r\n")
+			historyPos = -1
 			return line, nil
 
 		case key.Char == '\t':
-			// Tab: accept top suggestion
 			suggestions := allSuggestions()
 			if len(suggestions) > 0 {
 				idx := selectedSuggestion
@@ -224,29 +299,61 @@ func readLineWithSuggestions(s *Session, cmdNames []string) (string, error) {
 			}
 			renderInput()
 
-		case key.Special == KeyDown:
-			suggestions := allSuggestions()
-			if len(suggestions) > maxSuggestions {
-				suggestions = suggestions[:maxSuggestions]
-			}
-			if len(suggestions) > 0 {
-				selectedSuggestion++
-				if selectedSuggestion >= len(suggestions) {
-					selectedSuggestion = 0
-				}
-			}
-			renderInput()
-
 		case key.Special == KeyUp:
 			suggestions := allSuggestions()
 			if len(suggestions) > maxSuggestions {
 				suggestions = suggestions[:maxSuggestions]
 			}
-			if len(suggestions) > 0 {
+
+			// If there are suggestions visible, navigate them
+			if len(line) > 0 && len(suggestions) > 0 {
 				selectedSuggestion--
 				if selectedSuggestion < 0 {
 					selectedSuggestion = len(suggestions) - 1
 				}
+				renderInput()
+				continue
+			}
+
+			// Otherwise browse command history
+			if len(history) > 0 {
+				if historyPos == -1 {
+					savedLine = line
+					historyPos = len(history) - 1
+				} else if historyPos > 0 {
+					historyPos--
+				}
+				line = history[historyPos]
+				selectedSuggestion = -1
+			}
+			renderInput()
+
+		case key.Special == KeyDown:
+			suggestions := allSuggestions()
+			if len(suggestions) > maxSuggestions {
+				suggestions = suggestions[:maxSuggestions]
+			}
+
+			// If there are suggestions visible, navigate them
+			if len(line) > 0 && len(suggestions) > 0 {
+				selectedSuggestion++
+				if selectedSuggestion >= len(suggestions) {
+					selectedSuggestion = 0
+				}
+				renderInput()
+				continue
+			}
+
+			// Otherwise browse command history
+			if historyPos >= 0 {
+				historyPos++
+				if historyPos >= len(history) {
+					historyPos = -1
+					line = savedLine
+				} else {
+					line = history[historyPos]
+				}
+				selectedSuggestion = -1
 			}
 			renderInput()
 
@@ -254,12 +361,14 @@ func readLineWithSuggestions(s *Session, cmdNames []string) (string, error) {
 			if len(line) > 0 {
 				line = line[:len(line)-1]
 				selectedSuggestion = -1
+				historyPos = -1
 			}
 			renderInput()
 
 		case key.Char >= 32 && key.Char < 127:
 			line += string(key.Char)
 			selectedSuggestion = -1
+			historyPos = -1
 			renderInput()
 
 		default:
@@ -268,15 +377,12 @@ func readLineWithSuggestions(s *Session, cmdNames []string) (string, error) {
 	}
 }
 
-// getAllSuggestions returns suggestions for the current input. If the input
-// matches a command that accepts resource arguments (e.g. "site get "),
-// resource names are suggested. Otherwise command names are suggested.
+// getAllSuggestions returns suggestions for the current input.
 func getAllSuggestions(s *Session, input string, cmdNames []string) []string {
 	if input == "" {
 		return nil
 	}
 
-	// Check if input starts with a command that takes resource args + a space
 	for cmdPrefix, resourceType := range argResourceMap {
 		withSpace := cmdPrefix + " "
 		if strings.HasPrefix(strings.ToLower(input), strings.ToLower(withSpace)) {
@@ -285,18 +391,12 @@ func getAllSuggestions(s *Session, input string, cmdNames []string) []string {
 		}
 	}
 
-	// Fall back to command name suggestions
 	return getCommandSuggestions(input, cmdNames)
 }
 
-// getResourceSuggestions returns resource names matching the typed argument,
-// prefixed with the command so that accepting a suggestion fills the full line.
 func getResourceSuggestions(s *Session, cmdPrefix, resourceType, argFilter string) []string {
-	// Try to get items from cache (don't block on API calls during typing)
 	items := s.Cache.Get(resourceType)
 	if items == nil {
-		// Cache is empty -- try a background fetch so next keystroke has data.
-		// For now, fetch inline (it's fast for cached items).
 		fetched, err := s.Resolver.Fetch(s.Ctx, resourceType)
 		if err != nil {
 			return nil
@@ -318,7 +418,6 @@ func getResourceSuggestions(s *Session, cmdPrefix, resourceType, argFilter strin
 	return matches
 }
 
-// getCommandSuggestions returns command names matching the input prefix.
 func getCommandSuggestions(input string, cmdNames []string) []string {
 	lower := strings.ToLower(input)
 	var matches []string
@@ -334,7 +433,6 @@ func clearSuggestionLines(count int) {
 	if count == 0 {
 		return
 	}
-	// Save current position, move down and clear each line, then return
 	for i := 0; i < count; i++ {
 		fmt.Print("\r\n")
 		ClearLine()
@@ -342,7 +440,6 @@ func clearSuggestionLines(count int) {
 	MoveUp(count)
 }
 
-// stripAnsi removes ANSI escape codes from a string to get the visible length
 func stripAnsi(s string) string {
 	var result strings.Builder
 	inEscape := false
@@ -360,4 +457,156 @@ func stripAnsi(s string) string {
 		result.WriteByte(s[i])
 	}
 	return result.String()
+}
+
+// runScopeSet sets a scope filter by resolving the resource name/ID.
+// If no name is given, shows an interactive select.
+func runScopeSet(s *Session, resourceType, nameOrID string) {
+	currentSiteID := s.Scope.SiteID
+	currentSiteName := s.Scope.SiteName
+	if currentSiteName == "" {
+		currentSiteName = currentSiteID
+	}
+
+	// Always refetch VPCs when setting VPC scope so site filtering is current.
+	if resourceType == "vpc" {
+		s.Cache.Invalidate("vpc")
+	}
+
+	var item *NamedItem
+	var err error
+
+	if nameOrID != "" {
+		item, err = resolveByNameOrID(s, resourceType, nameOrID)
+	} else {
+		item, err = s.Resolver.Resolve(s.Ctx, resourceType, strings.Title(resourceType))
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s %v\n\n", Red("Error:"), err)
+		return
+	}
+
+	switch resourceType {
+	case "site":
+		s.Scope.SiteID = item.ID
+		s.Scope.SiteName = item.Name
+		s.Scope.VpcID = ""
+		s.Scope.VpcName = ""
+		s.Cache.InvalidateFiltered()
+	case "vpc":
+		if currentSiteID != "" && item.Extra != nil && item.Extra["siteId"] != "" && item.Extra["siteId"] != currentSiteID {
+			fmt.Fprintf(
+				os.Stderr,
+				"%s selected VPC belongs to a different site (%s). Current site scope is %s. Use %s first or choose a VPC in the current site.\n\n",
+				Red("Error:"),
+				Cyan(s.Resolver.ResolveID("site", item.Extra["siteId"])),
+				Cyan(currentSiteName),
+				Bold("scope clear"),
+			)
+			return
+		}
+
+		s.Scope.VpcID = item.ID
+		s.Scope.VpcName = item.Name
+		if item.Extra != nil && item.Extra["siteId"] != "" {
+			siteID := item.Extra["siteId"]
+			if currentSiteID == "" && s.Scope.SiteID != siteID {
+				siteName := s.Resolver.ResolveID("site", siteID)
+				s.Scope.SiteID = siteID
+				s.Scope.SiteName = siteName
+				fmt.Printf("Scope set: site = %s (from VPC)\n", Cyan(siteName))
+			}
+		}
+		s.Cache.InvalidateFiltered()
+	}
+
+	fmt.Printf("Scope set: %s = %s\n\n", resourceType, Cyan(item.Name))
+}
+
+// resolveByNameOrID looks up a resource by name or ID from the cache/fetcher.
+func resolveByNameOrID(s *Session, resourceType, query string) (*NamedItem, error) {
+	items, err := s.Resolver.Fetch(s.Ctx, resourceType)
+	if err != nil {
+		return nil, err
+	}
+	lower := strings.ToLower(query)
+	for _, item := range items {
+		if strings.ToLower(item.Name) == lower || strings.ToLower(item.ID) == lower {
+			return &item, nil
+		}
+	}
+	return nil, fmt.Errorf("no %s matching %q", resourceType, query)
+}
+
+// runOrgList extracts available orgs from the JWT token claims and displays them.
+func runOrgList(s *Session) {
+	if s.Token == "" {
+		fmt.Printf("Current org: %s\n", Cyan(s.Org))
+		fmt.Printf("%s No token available. Run %s first.\n", Yellow("Note:"), Bold("login"))
+		return
+	}
+
+	orgs := extractOrgsFromJWT(s.Token)
+	if len(orgs) == 0 {
+		fmt.Printf("Current org: %s\n", Cyan(s.Org))
+		fmt.Println("Could not extract orgs from token.")
+		fmt.Printf("Switch manually: %s\n", Bold("org set <org-name>"))
+		return
+	}
+
+	fmt.Printf("Current org: %s\n\n", Cyan(s.Org))
+	for _, org := range orgs {
+		marker := "  "
+		if org == s.Org {
+			marker = Cyan("> ")
+		}
+		fmt.Printf("%s%s\n", marker, org)
+	}
+	fmt.Printf("\nSwitch with: %s\n", Bold("org set <org-name>"))
+}
+
+// jwtAccessClaim mirrors the NGC access claim structure for JSON decoding.
+type jwtAccessClaim struct {
+	Type string `json:"type"`
+	Name string `json:"name"`
+}
+
+// extractOrgsFromJWT decodes the JWT payload (without verifying the signature)
+// and returns the list of NGC org names from the access claims.
+func extractOrgsFromJWT(tokenStr string) []string {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return nil
+	}
+
+	// Decode the payload (second part), adding padding if needed
+	payload := parts[1]
+	switch len(payload) % 4 {
+	case 2:
+		payload += "=="
+	case 3:
+		payload += "="
+	}
+
+	decoded, err := base64.URLEncoding.DecodeString(payload)
+	if err != nil {
+		return nil
+	}
+
+	var claims struct {
+		Access []jwtAccessClaim `json:"access"`
+	}
+	if err := json.Unmarshal(decoded, &claims); err != nil {
+		return nil
+	}
+
+	var orgs []string
+	seen := map[string]bool{}
+	for _, c := range claims.Access {
+		if strings.HasPrefix(c.Type, "group/ngc") && c.Name != "" && !seen[c.Name] {
+			orgs = append(orgs, c.Name)
+			seen[c.Name] = true
+		}
+	}
+	return orgs
 }

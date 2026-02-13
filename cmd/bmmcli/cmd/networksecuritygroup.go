@@ -6,11 +6,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -61,7 +63,9 @@ func runNSGListCmd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	nsgs, resp, err := apiClient.NetworkSecurityGroupAPI.GetAllNetworkSecurityGroup(ctx, org).Execute()
+	nsgs, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.NetworkSecurityGroup, *http.Response, error) {
+		return apiClient.NetworkSecurityGroupAPI.GetAllNetworkSecurityGroup(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -69,6 +73,7 @@ func runNSGListCmd(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing network security groups: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(nsgs))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

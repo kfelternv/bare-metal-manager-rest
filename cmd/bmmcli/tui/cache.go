@@ -53,6 +53,24 @@ func (c *Cache) Invalidate(resourceType string) {
 	delete(c.fetched, resourceType)
 }
 
+// InvalidateAll clears the entire cache (e.g. after switching orgs)
+func (c *Cache) InvalidateAll() {
+	c.items = make(map[string][]NamedItem)
+	c.fetched = make(map[string]time.Time)
+}
+
+// InvalidateFiltered clears caches for resource types that are affected by
+// scope filters (vpc, subnet, instance, etc.) but keeps stable caches
+// like sites that don't change with scope.
+func (c *Cache) InvalidateFiltered() {
+	for _, rt := range []string{"vpc", "subnet", "instance", "instance-type",
+		"allocation", "machine", "ip-block", "operating-system",
+		"ssh-key-group", "network-security-group"} {
+		delete(c.items, rt)
+		delete(c.fetched, rt)
+	}
+}
+
 // LookupByName finds a cached item by name (case-insensitive)
 func (c *Cache) LookupByName(resourceType, name string) *NamedItem {
 	items := c.Get(resourceType)

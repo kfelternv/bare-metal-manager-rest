@@ -6,11 +6,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -85,7 +87,9 @@ func runIBPartitionList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	partitions, resp, err := apiClient.InfiniBandPartitionAPI.GetAllInfinibandPartition(ctx, org).Execute()
+	partitions, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.InfiniBandPartition, *http.Response, error) {
+		return apiClient.InfiniBandPartitionAPI.GetAllInfinibandPartition(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -93,6 +97,7 @@ func runIBPartitionList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing InfiniBand partitions: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(partitions))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

@@ -6,10 +6,12 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -52,7 +54,9 @@ func runRackList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	racks, resp, err := apiClient.RackAPI.GetAllRack(ctx, org).Execute()
+	racks, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Rack, *http.Response, error) {
+		return apiClient.RackAPI.GetAllRack(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -60,6 +64,7 @@ func runRackList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing racks: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(racks))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -105,6 +106,7 @@ func runAllocationConstraintList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing allocation constraints: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(constraints))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")

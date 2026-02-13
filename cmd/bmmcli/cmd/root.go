@@ -23,24 +23,34 @@ type Config struct {
 
 // APIConfig holds server connection settings
 type APIConfig struct {
-	Base string `yaml:"base"`
-	Org  string `yaml:"org"`
-	Name string `yaml:"name"`
+	Base string `yaml:"base,omitempty"`
+	Org  string `yaml:"org,omitempty"`
+	Name string `yaml:"name,omitempty"`
 }
 
-// AuthConfig holds authentication configuration
+// AuthConfig holds authentication configuration.
+// Each method has its own section with credentials and a token field
+// where the session token is stored after login.
 type AuthConfig struct {
-	OIDC  OIDCConfig `yaml:"oidc"`
-	Token string     `yaml:"token"`
+	OIDC   *OIDCAuth   `yaml:"oidc,omitempty"`
+	APIKey *APIKeyAuth `yaml:"api_key,omitempty"`
 }
 
-// OIDCConfig holds OIDC provider settings used by bmm login
-type OIDCConfig struct {
-	TokenURL     string `yaml:"token_url"`
-	ClientID     string `yaml:"client_id"`
-	ClientSecret string `yaml:"client_secret"`
-	Username     string `yaml:"username"`
-	Password     string `yaml:"password"`
+// OIDCAuth holds OIDC provider settings and the resulting session token.
+type OIDCAuth struct {
+	TokenURL     string `yaml:"token_url,omitempty"`
+	ClientID     string `yaml:"client_id,omitempty"`
+	ClientSecret string `yaml:"client_secret,omitempty"`
+	Username     string `yaml:"username,omitempty"`
+	Password     string `yaml:"password,omitempty"`
+	Token        string `yaml:"token,omitempty"`
+}
+
+// APIKeyAuth holds NGC API key settings and the resulting session token.
+type APIKeyAuth struct {
+	AuthnURL string `yaml:"authn_url,omitempty"`
+	Key      string `yaml:"key,omitempty"`
+	Token    string `yaml:"token,omitempty"`
 }
 
 var rootCmd = &cobra.Command{
@@ -64,46 +74,67 @@ func init() {
 	rootCmd.PersistentFlags().String("base", "", "override API base URL")
 	rootCmd.PersistentFlags().StringP("output", "o", "", "output format: json, yaml (default from config)")
 
-	viper.BindPFlag("api.org", rootCmd.PersistentFlags().Lookup("org"))
-	viper.BindPFlag("api.base", rootCmd.PersistentFlags().Lookup("base"))
-	viper.BindPFlag("output", rootCmd.PersistentFlags().Lookup("output"))
+	configureViper()
 }
 
 func initConfig() {
-	if cfgFile != "" {
-		viper.SetConfigFile(cfgFile)
-	} else {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error finding home directory:", err)
-			os.Exit(1)
-		}
-
-		configDir := filepath.Join(home, ".bmm")
-		viper.AddConfigPath(configDir)
-		viper.SetConfigName("config")
-		viper.SetConfigType("yaml")
+	configureViper()
+	if err := configureConfigSource(); err != nil {
+		fmt.Fprintln(os.Stderr, "Error finding home directory:", err)
+		os.Exit(1)
 	}
 
-	// Set defaults targeting local kind cluster
-	viper.SetDefault("api.base", "http://localhost:8388")
-	viper.SetDefault("api.org", "test-org")
-	viper.SetDefault("api.name", "carbide")
-	viper.SetDefault("auth.oidc.token_url", "http://localhost:8080/realms/carbide-dev/protocol/openid-connect/token")
-	viper.SetDefault("auth.oidc.client_id", "carbide-api")
-	viper.SetDefault("auth.oidc.client_secret", "carbide-local-secret")
-	viper.SetDefault("auth.oidc.username", "admin@example.com")
-	viper.SetDefault("auth.oidc.password", "adminpassword")
-
-	viper.SetEnvPrefix("BMM")
-	viper.AutomaticEnv()
-
-	// Read config file if it exists; ignore error if not found
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			fmt.Fprintln(os.Stderr, "Error reading config:", err)
 		}
 	}
+}
+
+func configureViper() {
+	_ = viper.BindPFlag("api.org", rootCmd.PersistentFlags().Lookup("org"))
+	_ = viper.BindPFlag("api.base", rootCmd.PersistentFlags().Lookup("base"))
+	_ = viper.BindPFlag("output", rootCmd.PersistentFlags().Lookup("output"))
+
+	viper.SetDefault("api.base", "http://localhost:8388")
+	viper.SetDefault("api.org", "test-org")
+	viper.SetDefault("api.name", "carbide")
+
+	viper.SetEnvPrefix("BMM")
+	viper.AutomaticEnv()
+}
+
+func configureConfigSource() error {
+	if cfgFile != "" {
+		viper.SetConfigFile(cfgFile)
+		return nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	configDir := filepath.Join(home, ".bmm")
+	viper.AddConfigPath(configDir)
+	viper.SetConfigName("config")
+	viper.SetConfigType("yaml")
+	return nil
+}
+
+func reloadConfigWithFile(configPath string) error {
+	cfgFile = configPath
+	viper.Reset()
+	configureViper()
+	if err := configureConfigSource(); err != nil {
+		return fmt.Errorf("finding home directory: %w", err)
+	}
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return fmt.Errorf("reading config: %w", err)
+		}
+	}
+	return nil
 }
 
 // configFilePath returns the path to the config file being used, or the default path
@@ -118,95 +149,105 @@ func configFilePath() string {
 const configHeader = `# BMM CLI configuration
 #
 # API connection:
-#
-#   api.base -- server URL (e.g. http://localhost:8388)
+#   api.base -- server URL
 #   api.org  -- organization name used in API paths
-#   api.name -- the API path segment (default: carbide). This value is baked
-#               into the generated Go client. If your server uses a different
-#               api.name, you must update the OpenAPI spec and regenerate the
-#               client with: make set-api-name API_NAME=myname generate-client
-#               then rebuild: make build-cli
+#   api.name -- API path segment (default: carbide)
 #
-# Authentication (choose one):
+# Authentication -- configure one (or both) of the sections below,
+# then run: bmm login
 #
-#   Option 1 -- OIDC provider (e.g. Keycloak)
+# If both are configured, OIDC is used by default.
+# Use "bmm login --api-key" to force NGC API key flow.
 #
-#     Configure the auth.oidc section below, then run: bmm login
-#
-#     Example for Keycloak:
-#       auth:
-#         oidc:
-#           token_url: http://localhost:8080/realms/my-realm/protocol/openid-connect/token
-#           client_id: my-client
-#           client_secret: my-secret
-#           username: user@example.com
-#           password: mypassword
-#
-#   Option 2 -- API key / Bearer token
-#
-#     If you already have a token (e.g. from NGC or another provider),
-#     set auth.token directly. No bmm login needed.
-#
-#     Example:
-#       auth:
-#         token: eyJhbGciOiJSUzI1NiIs...
+# The session token is stored under each method's "token" field
+# after a successful login.
 #
 `
 
-const authGuidance = `No authentication token found. Set up auth in %s using one of:
+const authGuidance = `No authentication configured. Add one of these to %s:
 
-  1) OIDC provider: configure the auth.oidc section
-     (token_url, client_id, client_secret, and optionally username/password),
-     then run: bmm login
+  Option 1 -- NGC API key:
+    auth:
+      api_key:
+        authn_url: https://authn.nvidia.com/token
+        key: nvapi-xxxx
 
-  2) API key: set auth.token directly in your config file, e.g.
-       auth:
-         token: <your-bearer-token>
+  Option 2 -- OIDC provider (e.g. Keycloak):
+    auth:
+      oidc:
+        token_url: http://localhost:8080/realms/carbide-dev/protocol/openid-connect/token
+        client_id: carbide-api
+        client_secret: carbide-local-secret
+        username: admin@example.com
+        password: adminpassword
 
-Run "bmm init" to generate a sample config.`
+Then run: bmm login`
 
-// hasAuthProviderConfig returns true when OIDC provider settings are configured
-func hasAuthProviderConfig() bool {
-	return viper.GetString("auth.oidc.token_url") != "" &&
-		viper.GetString("auth.oidc.client_id") != "" &&
-		viper.GetString("auth.oidc.client_secret") != ""
-}
-
-// getAuthToken returns the stored auth token or an error with guidance
+// getAuthToken returns the best available session token.
+// Prefers OIDC token if present, falls back to API key token.
 func getAuthToken() (string, error) {
-	token := viper.GetString("auth.token")
-	if token != "" {
-		return token, nil
+	if t := viper.GetString("auth.oidc.token"); t != "" {
+		return t, nil
+	}
+	if t := viper.GetString("auth.api_key.token"); t != "" {
+		return t, nil
 	}
 	return "", fmt.Errorf(authGuidance, configFilePath())
 }
 
-// saveConfig writes the current viper config to the config file
-func saveConfig() error {
+// hasOIDCConfig returns true when OIDC provider settings are configured.
+func hasOIDCConfig() bool {
+	return viper.IsSet("auth.oidc.token_url") &&
+		viper.IsSet("auth.oidc.client_id") &&
+		viper.IsSet("auth.oidc.client_secret") &&
+		viper.GetString("auth.oidc.token_url") != "" &&
+		viper.GetString("auth.oidc.client_id") != "" &&
+		viper.GetString("auth.oidc.client_secret") != ""
+}
+
+// hasAPIKeyConfig returns true when NGC API key settings are configured.
+func hasAPIKeyConfig() bool {
+	return viper.IsSet("auth.api_key.authn_url") &&
+		viper.IsSet("auth.api_key.key") &&
+		viper.GetString("auth.api_key.authn_url") != "" &&
+		viper.GetString("auth.api_key.key") != ""
+}
+
+// readConfig reads the config file into a Config struct.
+func readConfig() Config {
+	cfgPath := configFilePath()
+	var cfg Config
+	if data, err := os.ReadFile(cfgPath); err == nil {
+		_ = yaml.Unmarshal(data, &cfg)
+	}
+	return cfg
+}
+
+// saveToken reads the config file, sets the token for the given auth method,
+// and writes it back. Only the token field is changed.
+func saveToken(method, token string) error {
 	cfgPath := configFilePath()
 
-	// Ensure directory exists
 	dir := filepath.Dir(cfgPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	cfg := Config{
-		API: APIConfig{
-			Base: viper.GetString("api.base"),
-			Org:  viper.GetString("api.org"),
-			Name: viper.GetString("api.name"),
-		},
-		Auth: AuthConfig{
-			OIDC: OIDCConfig{
-				TokenURL:     viper.GetString("auth.oidc.token_url"),
-				ClientID:     viper.GetString("auth.oidc.client_id"),
-				ClientSecret: viper.GetString("auth.oidc.client_secret"),
-				Username:     viper.GetString("auth.oidc.username"),
-				Password:     viper.GetString("auth.oidc.password"),
-			},
-			Token: viper.GetString("auth.token"),
-		},
+	cfg := readConfig()
+
+	switch method {
+	case "oidc":
+		if cfg.Auth.OIDC == nil {
+			cfg.Auth.OIDC = &OIDCAuth{}
+		}
+		cfg.Auth.OIDC.Token = token
+	case "api_key":
+		if cfg.Auth.APIKey == nil {
+			cfg.Auth.APIKey = &APIKeyAuth{}
+		}
+		cfg.Auth.APIKey.Token = token
+	default:
+		return fmt.Errorf("unknown auth method: %s", method)
 	}
 
 	data, err := yaml.Marshal(cfg)
@@ -214,9 +255,7 @@ func saveConfig() error {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
 
-	output := configHeader + string(data)
-
-	if err := os.WriteFile(cfgPath, []byte(output), 0600); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(data), 0600); err != nil {
 		return fmt.Errorf("writing config file: %w", err)
 	}
 

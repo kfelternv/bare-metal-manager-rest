@@ -4,13 +4,18 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"sort"
+	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -49,6 +54,10 @@ var machineDeleteCmd = &cobra.Command{
 
 func init() {
 	machineListCmd.Flags().Bool("json", false, "output raw JSON")
+	machineListCmd.Flags().String("site-id", "", "filter by site ID")
+	machineListCmd.Flags().String("vpc-id", "", "filter by VPC ID")
+	machineListCmd.Flags().String("status", "", "filter by status")
+	machineListCmd.Flags().String("instance-type-id", "", "filter by instance type ID")
 
 	machineUpdateCmd.Flags().String("instance-type-id", "", "instance type ID to assign")
 	machineUpdateCmd.Flags().Bool("clear-instance-type", false, "clear assigned instance type")
@@ -74,7 +83,24 @@ func runMachineList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	machines, resp, err := apiClient.MachineAPI.GetAllMachine(ctx, org).Execute()
+	siteID, _ := cmd.Flags().GetString("site-id")
+	vpcID, _ := cmd.Flags().GetString("vpc-id")
+	status, _ := cmd.Flags().GetString("status")
+	instanceTypeID, _ := cmd.Flags().GetString("instance-type-id")
+
+	machines, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Machine, *http.Response, error) {
+		req := apiClient.MachineAPI.GetAllMachine(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		if status != "" {
+			req = req.Status(status)
+		}
+		if instanceTypeID != "" {
+			req = req.InstanceTypeId(instanceTypeID)
+		}
+		return req.Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -82,6 +108,29 @@ func runMachineList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing machines: %v", err)
 	}
+
+	machineVpcNames, machineIDsInScope, vpcErr := fetchMachineVpcNames(apiClient, ctx, org, siteID, vpcID)
+	if vpcErr != nil {
+		if vpcID != "" {
+			return vpcErr
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(), "Note: could not load machine VPC names: %v\n", vpcErr)
+	}
+
+	summaryResp := resp
+	if vpcID != "" {
+		filtered := make([]client.Machine, 0, len(machines))
+		for _, m := range machines {
+			id := strings.TrimSpace(ptrStr(m.Id))
+			if _, ok := machineIDsInScope[id]; ok {
+				filtered = append(filtered, m)
+			}
+		}
+		machines = filtered
+		summaryResp = nil
+	}
+
+	pagination.PrintSummary(cmd.ErrOrStderr(), summaryResp, len(machines))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")
@@ -91,8 +140,84 @@ func runMachineList(cmd *cobra.Command, args []string) error {
 	case outputFlag == "yaml":
 		return printYAML(os.Stdout, machines)
 	default:
-		return printMachineTable(os.Stdout, machines)
+		return printMachineTable(os.Stdout, machines, machineVpcNames)
 	}
+}
+
+func fetchMachineVpcNames(apiClient *client.APIClient, ctx context.Context, org, siteID, vpcID string) (map[string]string, map[string]struct{}, error) {
+	instances, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Instance, *http.Response, error) {
+		req := apiClient.InstanceAPI.GetAllInstance(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		if vpcID != "" {
+			req = req.VpcId(vpcID)
+		}
+		return req.Execute()
+	})
+	if err != nil {
+		if resp != nil {
+			body := tryReadBody(resp.Body)
+			return nil, nil, fmt.Errorf("listing instances for machine VPC names (HTTP %d): %v\n%s", resp.StatusCode, err, body)
+		}
+		return nil, nil, fmt.Errorf("listing instances for machine VPC names: %v", err)
+	}
+
+	machineIDSet := make(map[string]struct{})
+	vpcIDsByMachineID := make(map[string]map[string]struct{})
+	for _, inst := range instances {
+		machineID := ""
+		if machineIDPtr, ok := inst.GetMachineIdOk(); ok && machineIDPtr != nil {
+			machineID = strings.TrimSpace(*machineIDPtr)
+		}
+		instanceVpcID := strings.TrimSpace(ptrStr(inst.VpcId))
+		if machineID == "" || instanceVpcID == "" {
+			continue
+		}
+		machineIDSet[machineID] = struct{}{}
+		if vpcIDsByMachineID[machineID] == nil {
+			vpcIDsByMachineID[machineID] = make(map[string]struct{})
+		}
+		vpcIDsByMachineID[machineID][instanceVpcID] = struct{}{}
+	}
+
+	vpcNamesByID := make(map[string]string)
+	vpcs, _, vpcErr := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.VPC, *http.Response, error) {
+		req := apiClient.VPCAPI.GetAllVpc(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
+	})
+	if vpcErr == nil {
+		for _, v := range vpcs {
+			id := strings.TrimSpace(ptrStr(v.Id))
+			if id == "" {
+				continue
+			}
+			name := strings.TrimSpace(ptrStr(v.Name))
+			if name == "" {
+				name = id
+			}
+			vpcNamesByID[id] = name
+		}
+	}
+
+	vpcNamesByMachineID := make(map[string]string, len(vpcIDsByMachineID))
+	for machineID, vpcSet := range vpcIDsByMachineID {
+		names := make([]string, 0, len(vpcSet))
+		for id := range vpcSet {
+			name := strings.TrimSpace(vpcNamesByID[id])
+			if name == "" {
+				name = id
+			}
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		vpcNamesByMachineID[machineID] = strings.Join(names, ",")
+	}
+
+	return vpcNamesByMachineID, machineIDSet, nil
 }
 
 func runMachineGet(cmd *cobra.Command, args []string) error {
@@ -193,13 +318,17 @@ func runMachineDelete(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printMachineTable(w io.Writer, machines []client.Machine) error {
+func printMachineTable(w io.Writer, machines []client.Machine, vpcNamesByMachineID map[string]string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(tw, "STATUS\tSITE ID\tAGE\tID")
+	fmt.Fprintln(tw, "STATUS\tSITE ID\tVPC\tAGE\tID")
 
 	for _, m := range machines {
 		id := ptrStr(m.Id)
 		siteID := ptrStr(m.SiteId)
+		vpcNames := strings.TrimSpace(vpcNamesByMachineID[id])
+		if vpcNames == "" {
+			vpcNames = "-"
+		}
 		status := ""
 		if m.Status != nil {
 			status = string(*m.Status)
@@ -209,7 +338,7 @@ func printMachineTable(w io.Writer, machines []client.Machine) error {
 			age = formatAge(time.Since(*m.Created))
 		}
 
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", status, siteID, age, id)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", status, siteID, vpcNames, age, id)
 	}
 
 	return tw.Flush()

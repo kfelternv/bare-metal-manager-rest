@@ -6,10 +6,12 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"text/tabwriter"
 
 	"github.com/nvidia/bare-metal-manager-rest/client"
+	"github.com/nvidia/bare-metal-manager-rest/cmd/bmmcli/internal/pagination"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -52,7 +54,9 @@ func runSkuList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	skus, resp, err := apiClient.SKUAPI.GetAllSku(ctx, org).Execute()
+	skus, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Sku, *http.Response, error) {
+		return apiClient.SKUAPI.GetAllSku(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+	})
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)
@@ -60,6 +64,7 @@ func runSkuList(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("listing SKUs: %v", err)
 	}
+	pagination.PrintSummary(cmd.ErrOrStderr(), resp, len(skus))
 
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	outputFlag, _ := cmd.Root().PersistentFlags().GetString("output")
