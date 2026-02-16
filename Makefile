@@ -18,6 +18,7 @@
 .PHONY: test-ipam test-site-agent test-site-manager test-workflow test-db test-api test-auth test-common test-cert-manager test-site-workflow migrate carbide-mock-server-build carbide-mock-server-start carbide-mock-server-stop rla-mock-server-build rla-mock-server-start rla-mock-server-stop
 .PHONY: validate-openapi preview-openapi generate-client
 .PHONY: pre-commit-install pre-commit-run pre-commit-update
+.PHONY: build-cli install-cli
 
 # Build configuration
 BUILD_DIR := build/binaries
@@ -483,3 +484,18 @@ pre-commit-run:
 # Update pre-commit hooks to latest versions
 pre-commit-update:
 	pre-commit autoupdate
+
+# =============================================================================
+# BMM CLI
+# =============================================================================
+
+# Build the CLI binary
+build-cli:
+	mkdir -p $(BUILD_DIR)
+	cd cmd/bmmcli && CGO_ENABLED=0 go build -o ../../$(BUILD_DIR)/bmm .
+	@echo "CLI built at $(BUILD_DIR)/bmm"
+
+# Build and install the CLI to GOPATH/bin
+install-cli:
+	cd cmd/bmmcli && go install .
+	@echo "bmm installed to $$(go env GOPATH)/bin/bmm"
