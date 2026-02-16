@@ -443,7 +443,7 @@ generate-client:
 		--package-name client \
 		--additional-properties=isGoSubmodule=true,enumClassPrefix=true \
 		--global-property=apis,models,supportingFiles
-	rm -rf client/docs client/api client/README.md
+	rm -rf client/docs client/api client/README.md client/test client/.openapi-generator
 	@echo "Client generated in client/"
 	go build ./client/...
 	@echo "Client compiles successfully"

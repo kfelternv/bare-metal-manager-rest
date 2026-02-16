@@ -10,7 +10,8 @@ go.sum
 git_push.sh
 .gitignore
 
-# Skip generated docs and bundled spec
+# Skip generated docs, bundled spec, and test stubs
 docs/*
 README.md
 api/openapi.yaml
+test/*
