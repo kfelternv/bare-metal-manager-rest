@@ -57,6 +57,7 @@ var nvlinkPartitionDeleteCmd = &cobra.Command{
 
 func init() {
 	nvlinkPartitionListCmd.Flags().Bool("json", false, "output raw JSON")
+	nvlinkPartitionListCmd.Flags().String("site-id", "", "filter by site ID")
 
 	nvlinkPartitionCreateCmd.Flags().String("name", "", "name for the partition (required)")
 	nvlinkPartitionCreateCmd.Flags().String("site-id", "", "site ID (required)")
@@ -86,9 +87,14 @@ func runNVLinkPartitionList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 
 	partitions, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.NVLinkLogicalPartition, *http.Response, error) {
-		return apiClient.NVLinkLogicalPartitionAPI.GetAllNvlinkLogicalPartition(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := apiClient.NVLinkLogicalPartitionAPI.GetAllNvlinkLogicalPartition(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		if resp != nil {

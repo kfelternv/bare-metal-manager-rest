@@ -44,6 +44,7 @@ var nsgDeleteCmd = &cobra.Command{
 
 func init() {
 	nsgListCmd.Flags().Bool("json", false, "output raw JSON")
+	nsgListCmd.Flags().String("site-id", "", "filter by site ID")
 
 	rootCmd.AddCommand(nsgCmd)
 	nsgCmd.AddCommand(nsgListCmd)
@@ -62,9 +63,14 @@ func runNSGListCmd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 
 	nsgs, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.NetworkSecurityGroup, *http.Response, error) {
-		return apiClient.NetworkSecurityGroupAPI.GetAllNetworkSecurityGroup(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := apiClient.NetworkSecurityGroupAPI.GetAllNetworkSecurityGroup(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		if resp != nil {

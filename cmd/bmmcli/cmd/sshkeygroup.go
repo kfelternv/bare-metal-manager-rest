@@ -44,6 +44,8 @@ var sshKeyGroupDeleteCmd = &cobra.Command{
 
 func init() {
 	sshKeyGroupListCmd.Flags().Bool("json", false, "output raw JSON")
+	sshKeyGroupListCmd.Flags().String("site-id", "", "filter by site ID")
+	sshKeyGroupListCmd.Flags().String("instance-id", "", "filter by instance ID")
 
 	rootCmd.AddCommand(sshKeyGroupCmd)
 	sshKeyGroupCmd.AddCommand(sshKeyGroupListCmd)
@@ -62,9 +64,18 @@ func runSSHKeyGroupList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
+	instanceID, _ := cmd.Flags().GetString("instance-id")
 
 	groups, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.SshKeyGroup, *http.Response, error) {
-		return apiClient.SSHKeyGroupAPI.GetAllSshKeyGroup(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := apiClient.SSHKeyGroupAPI.GetAllSshKeyGroup(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		if instanceID != "" {
+			req = req.InstanceId(instanceID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		if resp != nil {

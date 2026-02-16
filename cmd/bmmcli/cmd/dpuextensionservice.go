@@ -57,6 +57,7 @@ var dpuExtSvcDeleteCmd = &cobra.Command{
 
 func init() {
 	dpuExtSvcListCmd.Flags().Bool("json", false, "output raw JSON")
+	dpuExtSvcListCmd.Flags().String("site-id", "", "filter by site ID")
 
 	dpuExtSvcCreateCmd.Flags().String("name", "", "name for the service (required)")
 	dpuExtSvcCreateCmd.Flags().String("service-type", "", "service type (required)")
@@ -89,9 +90,14 @@ func runDPUExtSvcList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 
 	services, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.DpuExtensionService, *http.Response, error) {
-		return apiClient.DPUExtensionServiceAPI.GetAllDpuExtensionService(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := apiClient.DPUExtensionServiceAPI.GetAllDpuExtensionService(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		if resp != nil {

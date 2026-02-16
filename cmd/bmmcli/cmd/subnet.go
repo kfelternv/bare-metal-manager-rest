@@ -57,6 +57,7 @@ var subnetDeleteCmd = &cobra.Command{
 
 func init() {
 	subnetListCmd.Flags().Bool("json", false, "output raw JSON")
+	subnetListCmd.Flags().String("site-id", "", "filter by site ID")
 	subnetListCmd.Flags().String("vpc-id", "", "filter by VPC ID")
 
 	subnetCreateCmd.Flags().String("name", "", "name for the subnet (required)")
@@ -90,10 +91,14 @@ func runSubnetList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 	vpcID, _ := cmd.Flags().GetString("vpc-id")
 
 	subnets, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Subnet, *http.Response, error) {
 		req := apiClient.SubnetAPI.GetAllSubnet(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
 		if vpcID != "" {
 			req = req.VpcId(vpcID)
 		}

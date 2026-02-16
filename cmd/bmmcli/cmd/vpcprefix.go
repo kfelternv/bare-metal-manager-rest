@@ -57,6 +57,8 @@ var vpcPrefixDeleteCmd = &cobra.Command{
 
 func init() {
 	vpcPrefixListCmd.Flags().Bool("json", false, "output raw JSON")
+	vpcPrefixListCmd.Flags().String("site-id", "", "filter by site ID")
+	vpcPrefixListCmd.Flags().String("vpc-id", "", "filter by VPC ID")
 
 	vpcPrefixCreateCmd.Flags().String("name", "", "name for the VPC prefix (required)")
 	vpcPrefixCreateCmd.Flags().String("vpc-id", "", "VPC ID (required)")
@@ -88,9 +90,18 @@ func runVpcPrefixList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
+	vpcID, _ := cmd.Flags().GetString("vpc-id")
 
 	prefixes, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.VpcPrefix, *http.Response, error) {
-		return apiClient.VPCPrefixAPI.GetAllVpcPrefix(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := apiClient.VPCPrefixAPI.GetAllVpcPrefix(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		if vpcID != "" {
+			req = req.VpcId(vpcID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		if resp != nil {

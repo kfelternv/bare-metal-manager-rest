@@ -49,6 +49,7 @@ var expectedMachineDeleteCmd = &cobra.Command{
 
 func init() {
 	expectedMachineListCmd.Flags().Bool("json", false, "output raw JSON")
+	expectedMachineListCmd.Flags().String("site-id", "", "filter by site ID")
 
 	expectedMachineCreateCmd.Flags().String("site-id", "", "site ID (required)")
 	expectedMachineCreateCmd.Flags().String("bmc-mac-address", "", "BMC MAC address (required)")
@@ -75,9 +76,14 @@ func runExpectedMachineList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 
 	machines, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.ExpectedMachine, *http.Response, error) {
-		return apiClient.ExpectedMachineAPI.GetAllExpectedMachine(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := apiClient.ExpectedMachineAPI.GetAllExpectedMachine(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		if resp != nil {

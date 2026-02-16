@@ -36,6 +36,7 @@ var rackGetCmd = &cobra.Command{
 
 func init() {
 	rackListCmd.Flags().Bool("json", false, "output raw JSON")
+	rackListCmd.Flags().String("site-id", "", "filter by site ID")
 
 	rootCmd.AddCommand(rackCmd)
 	rackCmd.AddCommand(rackListCmd)
@@ -53,9 +54,14 @@ func runRackList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 
 	racks, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Rack, *http.Response, error) {
-		return apiClient.RackAPI.GetAllRack(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := apiClient.RackAPI.GetAllRack(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		if resp != nil {

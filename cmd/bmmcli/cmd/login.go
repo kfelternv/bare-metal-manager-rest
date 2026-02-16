@@ -37,6 +37,7 @@ var loginCmd = &cobra.Command{
 	Long: `Authenticate and save a session token to config.
 
 Login auto-detects the configured auth method:
+  - If auth.token is configured, login is not required.
   - If auth.oidc is configured, uses OIDC password flow (default).
   - If auth.api_key is configured, exchanges the NGC API key.
   - If both are configured, defaults to OIDC. Use --api-key to force NGC.
@@ -67,6 +68,11 @@ func runLogin(cmd *cobra.Command, args []string) error {
 				"      key: nvapi-xxxx", configFilePath())
 		}
 		return loginWithAPIKey()
+	}
+
+	if hasDirectTokenConfig() && !hasOIDCConfig() && !hasAPIKeyConfig() {
+		fmt.Fprintf(os.Stderr, "Direct token is already configured at auth.token in %s\n", configFilePath())
+		return nil
 	}
 
 	// Auto-detect: prefer OIDC, fall back to API key

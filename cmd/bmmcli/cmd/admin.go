@@ -154,6 +154,7 @@ func init() {
 	tenantCmd.AddCommand(tenantStatsCmd)
 
 	machineCapabilityListCmd.Flags().Bool("json", false, "output raw JSON")
+	machineCapabilityListCmd.Flags().String("site-id", "", "filter by site ID")
 	rootCmd.AddCommand(machineCapabilityCmd)
 	machineCapabilityCmd.AddCommand(machineCapabilityListCmd)
 }
@@ -436,8 +437,13 @@ func runMachineCapabilityList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 
-	caps, resp, err := apiClient.MachineAPI.GetAllMachineCapabilities(ctx, org).Execute()
+	req := apiClient.MachineAPI.GetAllMachineCapabilities(ctx, org)
+	if siteID != "" {
+		req = req.SiteId(siteID)
+	}
+	caps, resp, err := req.Execute()
 	if err != nil {
 		if resp != nil {
 			body := tryReadBody(resp.Body)

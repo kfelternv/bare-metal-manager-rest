@@ -57,6 +57,7 @@ var ibPartitionDeleteCmd = &cobra.Command{
 
 func init() {
 	ibPartitionListCmd.Flags().Bool("json", false, "output raw JSON")
+	ibPartitionListCmd.Flags().String("site-id", "", "filter by site ID")
 
 	ibPartitionCreateCmd.Flags().String("name", "", "name for the partition (required)")
 	ibPartitionCreateCmd.Flags().String("site-id", "", "site ID (required)")
@@ -86,9 +87,14 @@ func runIBPartitionList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 
 	partitions, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.InfiniBandPartition, *http.Response, error) {
-		return apiClient.InfiniBandPartitionAPI.GetAllInfinibandPartition(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := apiClient.InfiniBandPartitionAPI.GetAllInfinibandPartition(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		if resp != nil {

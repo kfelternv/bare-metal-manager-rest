@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -29,9 +30,10 @@ type APIConfig struct {
 }
 
 // AuthConfig holds authentication configuration.
-// Each method has its own section with credentials and a token field
-// where the session token is stored after login.
+// Token can be set directly for generic bearer-token auth.
+// Method-specific sections can also exchange and store session tokens.
 type AuthConfig struct {
+	Token  string      `yaml:"token,omitempty"`
 	OIDC   *OIDCAuth   `yaml:"oidc,omitempty"`
 	APIKey *APIKeyAuth `yaml:"api_key,omitempty"`
 }
@@ -153,10 +155,12 @@ const configHeader = `# BMM CLI configuration
 #   api.org  -- organization name used in API paths
 #   api.name -- API path segment (default: carbide)
 #
-# Authentication -- configure one (or both) of the sections below,
-# then run: bmm login
+# Authentication options:
+#   auth.token -- direct bearer token (no "bmm login" required)
+#   auth.oidc  -- OIDC password flow via "bmm login"
+#   auth.api_key -- NGC API key exchange via "bmm login --api-key"
 #
-# If both are configured, OIDC is used by default.
+# If both OIDC and API key are configured, OIDC is used by default.
 # Use "bmm login --api-key" to force NGC API key flow.
 #
 # The session token is stored under each method's "token" field
@@ -166,13 +170,17 @@ const configHeader = `# BMM CLI configuration
 
 const authGuidance = `No authentication configured. Add one of these to %s:
 
-  Option 1 -- NGC API key:
+  Option 1 -- Direct bearer token:
+    auth:
+      token: eyJhbGciOi...
+
+  Option 2 -- NGC API key:
     auth:
       api_key:
         authn_url: https://authn.nvidia.com/token
         key: nvapi-xxxx
 
-  Option 2 -- OIDC provider (e.g. Keycloak):
+  Option 3 -- OIDC provider (e.g. Keycloak):
     auth:
       oidc:
         token_url: http://localhost:8080/realms/carbide-dev/protocol/openid-connect/token
@@ -181,11 +189,14 @@ const authGuidance = `No authentication configured. Add one of these to %s:
         username: admin@example.com
         password: adminpassword
 
-Then run: bmm login`
+Then run: bmm login (not needed for Option 1)`
 
 // getAuthToken returns the best available session token.
-// Prefers OIDC token if present, falls back to API key token.
+// Prefers direct auth.token, then OIDC/API key session tokens.
 func getAuthToken() (string, error) {
+	if t := viper.GetString("auth.token"); t != "" {
+		return t, nil
+	}
 	if t := viper.GetString("auth.oidc.token"); t != "" {
 		return t, nil
 	}
@@ -193,6 +204,10 @@ func getAuthToken() (string, error) {
 		return t, nil
 	}
 	return "", fmt.Errorf(authGuidance, configFilePath())
+}
+
+func hasDirectTokenConfig() bool {
+	return strings.TrimSpace(viper.GetString("auth.token")) != ""
 }
 
 // hasOIDCConfig returns true when OIDC provider settings are configured.

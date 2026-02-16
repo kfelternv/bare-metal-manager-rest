@@ -137,6 +137,7 @@ func AllCommands() []Command {
 		{Name: "instance list", Description: "List all instances", Run: cmdInstanceList},
 		{Name: "instance get", Description: "Get instance details", Run: cmdInstanceGet},
 		{Name: "instance create", Description: "Create an instance (guided)", Run: cmdInstanceCreate},
+		{Name: "instance update", Description: "Update an instance", Run: cmdInstanceUpdate},
 		{Name: "instance delete", Description: "Delete an instance", Run: cmdInstanceDelete},
 
 		// Instance Type
@@ -148,6 +149,9 @@ func AllCommands() []Command {
 		// Operating System
 		{Name: "operating-system list", Description: "List operating systems", Run: cmdOSList},
 		{Name: "operating-system get", Description: "Get operating system details", Run: cmdOSGet},
+		{Name: "operating-system create", Description: "Create an operating system", Run: cmdOSCreate},
+		{Name: "operating-system update", Description: "Update an operating system", Run: cmdOSUpdate},
+		{Name: "operating-system delete", Description: "Delete an operating system", Run: cmdOSDelete},
 
 		// SSH Key Group
 		{Name: "ssh-key-group list", Description: "List SSH key groups", Run: cmdSSHKeyGroupList},
@@ -285,9 +289,13 @@ func (s *Session) fetchVPCs(ctx context.Context) ([]NamedItem, error) {
 }
 
 func (s *Session) fetchSubnets(ctx context.Context) ([]NamedItem, error) {
+	scopeSiteID := s.Scope.SiteID
 	scopeVpcID := s.Scope.VpcID
 	subnets, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Subnet, *http.Response, error) {
 		req := s.Client.SubnetAPI.GetAllSubnet(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
 		if scopeVpcID != "" {
 			req = req.VpcId(scopeVpcID)
 		}
@@ -408,8 +416,13 @@ func (s *Session) fetchInstanceTypesBySite(ctx context.Context, siteID string) (
 }
 
 func (s *Session) fetchOperatingSystems(ctx context.Context) ([]NamedItem, error) {
+	scopeSiteID := s.Scope.SiteID
 	osList, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.OperatingSystem, *http.Response, error) {
-		return s.Client.OperatingSystemAPI.GetAllOperatingSystem(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := s.Client.OperatingSystemAPI.GetAllOperatingSystem(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		return nil, err
@@ -431,8 +444,13 @@ func (s *Session) fetchOperatingSystems(ctx context.Context) ([]NamedItem, error
 }
 
 func (s *Session) fetchSSHKeyGroups(ctx context.Context) ([]NamedItem, error) {
+	scopeSiteID := s.Scope.SiteID
 	groups, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.SshKeyGroup, *http.Response, error) {
-		return s.Client.SSHKeyGroupAPI.GetAllSshKeyGroup(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := s.Client.SSHKeyGroupAPI.GetAllSshKeyGroup(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		return nil, err
@@ -677,8 +695,13 @@ func (s *Session) fetchIPBlocks(ctx context.Context) ([]NamedItem, error) {
 }
 
 func (s *Session) fetchNetworkSecurityGroups(ctx context.Context) ([]NamedItem, error) {
+	scopeSiteID := s.Scope.SiteID
 	nsgs, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.NetworkSecurityGroup, *http.Response, error) {
-		return s.Client.NetworkSecurityGroupAPI.GetAllNetworkSecurityGroup(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := s.Client.NetworkSecurityGroupAPI.GetAllNetworkSecurityGroup(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		return nil, err
@@ -752,8 +775,13 @@ func (s *Session) fetchSSHKeys(ctx context.Context) ([]NamedItem, error) {
 }
 
 func (s *Session) fetchSKUs(ctx context.Context) ([]NamedItem, error) {
+	scopeSiteID := s.Scope.SiteID
 	skus, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Sku, *http.Response, error) {
-		return s.Client.SKUAPI.GetAllSku(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := s.Client.SKUAPI.GetAllSku(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		return nil, err
@@ -779,8 +807,13 @@ func (s *Session) fetchSKUs(ctx context.Context) ([]NamedItem, error) {
 }
 
 func (s *Session) fetchRacks(ctx context.Context) ([]NamedItem, error) {
+	scopeSiteID := s.Scope.SiteID
 	racks, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Rack, *http.Response, error) {
-		return s.Client.RackAPI.GetAllRack(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := s.Client.RackAPI.GetAllRack(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		return nil, err
@@ -801,8 +834,17 @@ func (s *Session) fetchRacks(ctx context.Context) ([]NamedItem, error) {
 }
 
 func (s *Session) fetchVPCPrefixes(ctx context.Context) ([]NamedItem, error) {
+	scopeSiteID := s.Scope.SiteID
+	scopeVpcID := s.Scope.VpcID
 	prefixes, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.VpcPrefix, *http.Response, error) {
-		return s.Client.VPCPrefixAPI.GetAllVpcPrefix(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := s.Client.VPCPrefixAPI.GetAllVpcPrefix(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		if scopeVpcID != "" {
+			req = req.VpcId(scopeVpcID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		return nil, err
@@ -857,8 +899,13 @@ func (s *Session) fetchTenantAccounts(ctx context.Context) ([]NamedItem, error) 
 }
 
 func (s *Session) fetchExpectedMachines(ctx context.Context) ([]NamedItem, error) {
+	scopeSiteID := s.Scope.SiteID
 	machines, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.ExpectedMachine, *http.Response, error) {
-		return s.Client.ExpectedMachineAPI.GetAllExpectedMachine(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := s.Client.ExpectedMachineAPI.GetAllExpectedMachine(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		return nil, err
@@ -887,8 +934,13 @@ func (s *Session) fetchExpectedMachines(ctx context.Context) ([]NamedItem, error
 }
 
 func (s *Session) fetchDPUExtensionServices(ctx context.Context) ([]NamedItem, error) {
+	scopeSiteID := s.Scope.SiteID
 	services, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.DpuExtensionService, *http.Response, error) {
-		return s.Client.DPUExtensionServiceAPI.GetAllDpuExtensionService(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := s.Client.DPUExtensionServiceAPI.GetAllDpuExtensionService(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		return nil, err
@@ -909,8 +961,13 @@ func (s *Session) fetchDPUExtensionServices(ctx context.Context) ([]NamedItem, e
 }
 
 func (s *Session) fetchInfiniBandPartitions(ctx context.Context) ([]NamedItem, error) {
+	scopeSiteID := s.Scope.SiteID
 	partitions, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.InfiniBandPartition, *http.Response, error) {
-		return s.Client.InfiniBandPartitionAPI.GetAllInfinibandPartition(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := s.Client.InfiniBandPartitionAPI.GetAllInfinibandPartition(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		return nil, err
@@ -933,8 +990,13 @@ func (s *Session) fetchInfiniBandPartitions(ctx context.Context) ([]NamedItem, e
 }
 
 func (s *Session) fetchNVLinkLogicalPartitions(ctx context.Context) ([]NamedItem, error) {
+	scopeSiteID := s.Scope.SiteID
 	partitions, _, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.NVLinkLogicalPartition, *http.Response, error) {
-		return s.Client.NVLinkLogicalPartitionAPI.GetAllNvlinkLogicalPartition(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := s.Client.NVLinkLogicalPartitionAPI.GetAllNvlinkLogicalPartition(ctx, s.Org).PageNumber(pageNumber).PageSize(pageSize)
+		if scopeSiteID != "" {
+			req = req.SiteId(scopeSiteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		return nil, err
@@ -1043,11 +1105,17 @@ func appendScopeFlags(s *Session, parts []string) []string {
 	scopeVpcID := strings.TrimSpace(s.Scope.VpcID)
 
 	switch resource {
-	case "vpc", "allocation", "ip-block":
+	case "vpc", "allocation", "ip-block",
+		"operating-system", "ssh-key-group", "network-security-group",
+		"sku", "rack", "expected-machine", "dpu-extension-service",
+		"infiniband-partition", "nvlink-logical-partition", "machine-capability":
 		if scopeSiteID != "" && !hasArgFlag(out, "--site-id") {
 			out = append(out, "--site-id", scopeSiteID)
 		}
-	case "subnet":
+	case "subnet", "vpc-prefix":
+		if scopeSiteID != "" && !hasArgFlag(out, "--site-id") {
+			out = append(out, "--site-id", scopeSiteID)
+		}
 		if scopeVpcID != "" && !hasArgFlag(out, "--vpc-id") {
 			out = append(out, "--vpc-id", scopeVpcID)
 		}
@@ -1231,6 +1299,51 @@ func cmdInstanceCreate(s *Session, args []string) error {
 	return RunInstanceWizard(s)
 }
 
+func cmdInstanceUpdate(s *Session, args []string) error {
+	instance, err := s.Resolver.ResolveWithArgs(s.Ctx, "instance", "Instance to update", args)
+	if err != nil {
+		return err
+	}
+
+	name, err := PromptText("New instance name (optional)", false)
+	if err != nil {
+		return err
+	}
+	desc, err := PromptText("New description (optional)", false)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) == "" && strings.TrimSpace(desc) == "" {
+		return fmt.Errorf("no update fields provided")
+	}
+
+	logArgs := []string{"instance", "update", instance.ID}
+	if strings.TrimSpace(name) != "" {
+		logArgs = append(logArgs, "--name", name)
+	}
+	if strings.TrimSpace(desc) != "" {
+		logArgs = append(logArgs, "--description", desc)
+	}
+	LogCmd(logArgs...)
+
+	req := client.NewInstanceUpdateRequest()
+	if strings.TrimSpace(name) != "" {
+		req.SetName(name)
+	}
+	if strings.TrimSpace(desc) != "" {
+		req.SetDescription(desc)
+	}
+
+	updated, _, err := s.Client.InstanceAPI.UpdateInstance(s.Ctx, s.Org, instance.ID).InstanceUpdateRequest(*req).Execute()
+	if err != nil {
+		return fmt.Errorf("updating instance: %w", err)
+	}
+
+	s.Cache.Invalidate("instance")
+	fmt.Printf("%s Instance updated: %s (%s)\n", Green("OK"), ptrStr(updated.Name), ptrStr(updated.Id))
+	return printDetailJSON(os.Stdout, updated)
+}
+
 func cmdInstanceTypeList(s *Session, args []string) error {
 	// Instance types require a site; prompt for one
 	site, err := s.Resolver.Resolve(s.Ctx, "site", "Site")
@@ -1291,6 +1404,131 @@ func cmdOSList(s *Session, args []string) error {
 		return err
 	}
 	return printResourceTable(os.Stdout, "NAME", "STATUS", "ID", items)
+}
+
+func cmdOSCreate(s *Session, args []string) error {
+	name, err := PromptText("Operating system name", true)
+	if err != nil {
+		return err
+	}
+	description, err := PromptText("Description (optional)", false)
+	if err != nil {
+		return err
+	}
+	ipxeScript, err := PromptText("iPXE script or URL (optional)", false)
+	if err != nil {
+		return err
+	}
+	imageURL, err := PromptText("Image URL (optional)", false)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(ipxeScript) != "" && strings.TrimSpace(imageURL) != "" {
+		return fmt.Errorf("provide either iPXE script or image URL, not both")
+	}
+
+	req := client.NewOperatingSystemCreateRequest(name)
+	tenantID, tenantErr := s.getTenantID(s.Ctx)
+	if tenantErr == nil && strings.TrimSpace(tenantID) != "" {
+		req.SetTenantId(tenantID)
+	} else {
+		provider, _, providerErr := s.Client.InfrastructureProviderAPI.GetCurrentInfrastructureProvider(s.Ctx, s.Org).Execute()
+		if providerErr != nil {
+			if tenantErr != nil {
+				return fmt.Errorf("unable to determine owning tenant/provider for operating system creation: tenant error: %v; provider error: %w", tenantErr, providerErr)
+			}
+			return fmt.Errorf("unable to determine owning provider for operating system creation: %w", providerErr)
+		}
+		providerID := strings.TrimSpace(ptrStr(provider.Id))
+		if providerID == "" {
+			return fmt.Errorf("unable to determine owning tenant/provider for operating system creation")
+		}
+		req.SetInfrastructureProviderId(providerID)
+	}
+	if strings.TrimSpace(description) != "" {
+		req.SetDescription(description)
+	}
+	if strings.TrimSpace(s.Scope.SiteID) != "" {
+		req.SetSiteIds([]string{s.Scope.SiteID})
+	}
+	if strings.TrimSpace(ipxeScript) != "" {
+		req.SetIpxeScript(ipxeScript)
+	}
+	if strings.TrimSpace(imageURL) != "" {
+		req.SetImageUrl(imageURL)
+	}
+
+	logArgs := []string{"operating-system", "create", "--name", name}
+	if req.HasTenantId() {
+		logArgs = append(logArgs, "--tenant-id", req.GetTenantId())
+	}
+	if req.HasInfrastructureProviderId() {
+		logArgs = append(logArgs, "--infrastructure-provider-id", req.GetInfrastructureProviderId())
+	}
+	if strings.TrimSpace(s.Scope.SiteID) != "" {
+		logArgs = append(logArgs, "--site-id", s.Scope.SiteID)
+	}
+	if strings.TrimSpace(ipxeScript) != "" {
+		logArgs = append(logArgs, "--ipxe-script", strconv.Quote(ipxeScript))
+	}
+	if strings.TrimSpace(imageURL) != "" {
+		logArgs = append(logArgs, "--image-url", imageURL)
+	}
+	LogCmd(logArgs...)
+
+	created, _, err := s.Client.OperatingSystemAPI.CreateOperatingSystem(s.Ctx, s.Org).OperatingSystemCreateRequest(*req).Execute()
+	if err != nil {
+		return fmt.Errorf("creating operating system: %w", err)
+	}
+
+	s.Cache.Invalidate("operating-system")
+	fmt.Printf("%s Operating system created: %s (%s)\n", Green("OK"), ptrStr(created.Name), ptrStr(created.Id))
+	return printDetailJSON(os.Stdout, created)
+}
+
+func cmdOSUpdate(s *Session, args []string) error {
+	osItem, err := s.Resolver.ResolveWithArgs(s.Ctx, "operating-system", "Operating System to update", args)
+	if err != nil {
+		return err
+	}
+
+	name, err := PromptText("New operating system name (optional)", false)
+	if err != nil {
+		return err
+	}
+	description, err := PromptText("New description (optional)", false)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) == "" && strings.TrimSpace(description) == "" {
+		return fmt.Errorf("no update fields provided")
+	}
+
+	logArgs := []string{"operating-system", "update", osItem.ID}
+	if strings.TrimSpace(name) != "" {
+		logArgs = append(logArgs, "--name", name)
+	}
+	if strings.TrimSpace(description) != "" {
+		logArgs = append(logArgs, "--description", description)
+	}
+	LogCmd(logArgs...)
+
+	req := client.NewOperatingSystemUpdateRequest()
+	if strings.TrimSpace(name) != "" {
+		req.SetName(name)
+	}
+	if strings.TrimSpace(description) != "" {
+		req.SetDescription(description)
+	}
+
+	updated, _, err := s.Client.OperatingSystemAPI.UpdateOperatingSystem(s.Ctx, s.Org, osItem.ID).OperatingSystemUpdateRequest(*req).Execute()
+	if err != nil {
+		return fmt.Errorf("updating operating system: %w", err)
+	}
+
+	s.Cache.Invalidate("operating-system")
+	fmt.Printf("%s Operating system updated: %s (%s)\n", Green("OK"), ptrStr(updated.Name), ptrStr(updated.Id))
+	return printDetailJSON(os.Stdout, updated)
 }
 
 func cmdSSHKeyGroupList(s *Session, args []string) error {
@@ -1446,7 +1684,7 @@ func cmdNSGList(s *Session, args []string) error {
 }
 
 func cmdSSHKeyList(s *Session, args []string) error {
-	LogCmd("ssh-key", "list")
+	LogScopedCmd(s, "ssh-key", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "ssh-key")
 	if err != nil {
 		return err
@@ -1461,7 +1699,7 @@ func cmdSSHKeyList(s *Session, args []string) error {
 }
 
 func cmdSKUList(s *Session, args []string) error {
-	LogCmd("sku", "list")
+	LogScopedCmd(s, "sku", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "sku")
 	if err != nil {
 		return err
@@ -1476,7 +1714,7 @@ func cmdSKUList(s *Session, args []string) error {
 }
 
 func cmdRackList(s *Session, args []string) error {
-	LogCmd("rack", "list")
+	LogScopedCmd(s, "rack", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "rack")
 	if err != nil {
 		return err
@@ -1491,7 +1729,7 @@ func cmdRackList(s *Session, args []string) error {
 }
 
 func cmdVPCPrefixList(s *Session, args []string) error {
-	LogCmd("vpc-prefix", "list")
+	LogScopedCmd(s, "vpc-prefix", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "vpc-prefix")
 	if err != nil {
 		return err
@@ -1507,7 +1745,7 @@ func cmdVPCPrefixList(s *Session, args []string) error {
 }
 
 func cmdTenantAccountList(s *Session, args []string) error {
-	LogCmd("tenant-account", "list")
+	LogScopedCmd(s, "tenant-account", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "tenant-account")
 	if err != nil {
 		return err
@@ -1522,7 +1760,7 @@ func cmdTenantAccountList(s *Session, args []string) error {
 }
 
 func cmdExpectedMachineList(s *Session, args []string) error {
-	LogCmd("expected-machine", "list")
+	LogScopedCmd(s, "expected-machine", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "expected-machine")
 	if err != nil {
 		return err
@@ -1537,7 +1775,7 @@ func cmdExpectedMachineList(s *Session, args []string) error {
 }
 
 func cmdDPUExtensionServiceList(s *Session, args []string) error {
-	LogCmd("dpu-extension-service", "list")
+	LogScopedCmd(s, "dpu-extension-service", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "dpu-extension-service")
 	if err != nil {
 		return err
@@ -1552,7 +1790,7 @@ func cmdDPUExtensionServiceList(s *Session, args []string) error {
 }
 
 func cmdInfiniBandPartitionList(s *Session, args []string) error {
-	LogCmd("infiniband-partition", "list")
+	LogScopedCmd(s, "infiniband-partition", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "infiniband-partition")
 	if err != nil {
 		return err
@@ -1567,7 +1805,7 @@ func cmdInfiniBandPartitionList(s *Session, args []string) error {
 }
 
 func cmdNVLinkLogicalPartitionList(s *Session, args []string) error {
-	LogCmd("nvlink-logical-partition", "list")
+	LogScopedCmd(s, "nvlink-logical-partition", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "nvlink-logical-partition")
 	if err != nil {
 		return err
@@ -1614,8 +1852,12 @@ func cmdAuditList(s *Session, args []string) error {
 }
 
 func cmdMachineCapabilityList(s *Session, args []string) error {
-	LogCmd("machine-capability", "list")
-	caps, _, err := s.Client.MachineAPI.GetAllMachineCapabilities(s.Ctx, s.Org).Execute()
+	LogScopedCmd(s, "machine-capability", "list")
+	req := s.Client.MachineAPI.GetAllMachineCapabilities(s.Ctx, s.Org)
+	if strings.TrimSpace(s.Scope.SiteID) != "" {
+		req = req.SiteId(s.Scope.SiteID)
+	}
+	caps, _, err := req.Execute()
 	if err != nil {
 		return fmt.Errorf("listing machine capabilities: %w", err)
 	}
@@ -2090,6 +2332,25 @@ func cmdInstanceDelete(s *Session, args []string) error {
 	}
 	s.Cache.Invalidate("instance")
 	fmt.Printf("%s Instance deleted: %s\n", Green("OK"), instance.Name)
+	return nil
+}
+
+func cmdOSDelete(s *Session, args []string) error {
+	osItem, err := s.Resolver.ResolveWithArgs(s.Ctx, "operating-system", "Operating System to delete", args)
+	if err != nil {
+		return err
+	}
+	ok, err := PromptConfirm(fmt.Sprintf("Delete operating system %s (%s)?", osItem.Name, osItem.ID))
+	if err != nil || !ok {
+		return err
+	}
+	LogCmd("operating-system", "delete", osItem.ID)
+	_, err = s.Client.OperatingSystemAPI.DeleteOperatingSystem(s.Ctx, s.Org, osItem.ID).Execute()
+	if err != nil {
+		return fmt.Errorf("deleting operating system: %w", err)
+	}
+	s.Cache.Invalidate("operating-system")
+	fmt.Printf("%s Operating system deleted: %s\n", Green("OK"), osItem.Name)
 	return nil
 }
 

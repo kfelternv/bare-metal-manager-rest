@@ -36,6 +36,7 @@ var skuGetCmd = &cobra.Command{
 
 func init() {
 	skuListCmd.Flags().Bool("json", false, "output raw JSON")
+	skuListCmd.Flags().String("site-id", "", "filter by site ID")
 
 	rootCmd.AddCommand(skuCmd)
 	skuCmd.AddCommand(skuListCmd)
@@ -53,9 +54,14 @@ func runSkuList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	siteID, _ := cmd.Flags().GetString("site-id")
 
 	skus, resp, err := pagination.FetchAllPages(func(pageNumber, pageSize int32) ([]client.Sku, *http.Response, error) {
-		return apiClient.SKUAPI.GetAllSku(ctx, org).PageNumber(pageNumber).PageSize(pageSize).Execute()
+		req := apiClient.SKUAPI.GetAllSku(ctx, org).PageNumber(pageNumber).PageSize(pageSize)
+		if siteID != "" {
+			req = req.SiteId(siteID)
+		}
+		return req.Execute()
 	})
 	if err != nil {
 		if resp != nil {
