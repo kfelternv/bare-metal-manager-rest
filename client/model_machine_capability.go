@@ -155,7 +155,6 @@ func (o *MachineCapability) HasFrequency() bool {
 func (o *MachineCapability) SetFrequency(v string) {
 	o.Frequency.Set(&v)
 }
-
 // SetFrequencyNil sets the value for Frequency to be an explicit nil
 func (o *MachineCapability) SetFrequencyNil() {
 	o.Frequency.Set(nil)
@@ -198,7 +197,6 @@ func (o *MachineCapability) HasCores() bool {
 func (o *MachineCapability) SetCores(v int32) {
 	o.Cores.Set(&v)
 }
-
 // SetCoresNil sets the value for Cores to be an explicit nil
 func (o *MachineCapability) SetCoresNil() {
 	o.Cores.Set(nil)
@@ -241,7 +239,6 @@ func (o *MachineCapability) HasThreads() bool {
 func (o *MachineCapability) SetThreads(v int32) {
 	o.Threads.Set(&v)
 }
-
 // SetThreadsNil sets the value for Threads to be an explicit nil
 func (o *MachineCapability) SetThreadsNil() {
 	o.Threads.Set(nil)
@@ -284,7 +281,6 @@ func (o *MachineCapability) HasCapacity() bool {
 func (o *MachineCapability) SetCapacity(v string) {
 	o.Capacity.Set(&v)
 }
-
 // SetCapacityNil sets the value for Capacity to be an explicit nil
 func (o *MachineCapability) SetCapacityNil() {
 	o.Capacity.Set(nil)
@@ -327,7 +323,6 @@ func (o *MachineCapability) HasVendor() bool {
 func (o *MachineCapability) SetVendor(v string) {
 	o.Vendor.Set(&v)
 }
-
 // SetVendorNil sets the value for Vendor to be an explicit nil
 func (o *MachineCapability) SetVendorNil() {
 	o.Vendor.Set(nil)
@@ -402,7 +397,6 @@ func (o *MachineCapability) HasCount() bool {
 func (o *MachineCapability) SetCount(v int32) {
 	o.Count.Set(&v)
 }
-
 // SetCountNil sets the value for Count to be an explicit nil
 func (o *MachineCapability) SetCountNil() {
 	o.Count.Set(nil)
@@ -445,7 +439,6 @@ func (o *MachineCapability) HasDeviceType() bool {
 func (o *MachineCapability) SetDeviceType(v string) {
 	o.DeviceType.Set(&v)
 }
-
 // SetDeviceTypeNil sets the value for DeviceType to be an explicit nil
 func (o *MachineCapability) SetDeviceTypeNil() {
 	o.DeviceType.Set(nil)
@@ -457,7 +450,7 @@ func (o *MachineCapability) UnsetDeviceType() {
 }
 
 func (o MachineCapability) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -534,3 +527,5 @@ func (v *NullableMachineCapability) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

@@ -107,7 +107,6 @@ func (o *MachineHealthProbeSuccess) HasTarget() bool {
 func (o *MachineHealthProbeSuccess) SetTarget(v string) {
 	o.Target.Set(&v)
 }
-
 // SetTargetNil sets the value for Target to be an explicit nil
 func (o *MachineHealthProbeSuccess) SetTargetNil() {
 	o.Target.Set(nil)
@@ -119,7 +118,7 @@ func (o *MachineHealthProbeSuccess) UnsetTarget() {
 }
 
 func (o MachineHealthProbeSuccess) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -172,3 +171,5 @@ func (v *NullableMachineHealthProbeSuccess) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

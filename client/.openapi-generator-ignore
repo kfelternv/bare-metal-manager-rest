@@ -9,3 +9,8 @@ go.sum
 .travis.yml
 git_push.sh
 .gitignore
+
+# Skip generated docs and bundled spec
+docs/*
+README.md
+api/openapi.yaml

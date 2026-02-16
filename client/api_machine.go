@@ -20,14 +20,15 @@ import (
 	"strings"
 )
 
+
 // MachineAPIService MachineAPI service
 type MachineAPIService service
 
 type ApiDeleteMachineRequest struct {
-	ctx        context.Context
+	ctx context.Context
 	ApiService *MachineAPIService
-	org        string
-	machineId  string
+	org string
+	machineId string
 }
 
 func (r ApiDeleteMachineRequest) Execute() (*http.Response, error) {
@@ -39,26 +40,26 @@ DeleteMachine Delete a Machine from a Site
 
 Org must have an Infrastructure Provider entity. Machine must belong to the Provider. User must have FORGE_PROVIDER_ADMIN authorization role. Machine must meet certain criteria to be eligible for deletion.
 
-	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
-	@param org Name of the Org
-	@param machineId ID of the Machine
-	@return ApiDeleteMachineRequest
+ @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+ @param org Name of the Org
+ @param machineId ID of the Machine
+ @return ApiDeleteMachineRequest
 */
 func (a *MachineAPIService) DeleteMachine(ctx context.Context, org string, machineId string) ApiDeleteMachineRequest {
 	return ApiDeleteMachineRequest{
 		ApiService: a,
-		ctx:        ctx,
-		org:        org,
-		machineId:  machineId,
+		ctx: ctx,
+		org: org,
+		machineId: machineId,
 	}
 }
 
 // Execute executes the request
 func (a *MachineAPIService) DeleteMachineExecute(r ApiDeleteMachineRequest) (*http.Response, error) {
 	var (
-		localVarHTTPMethod = http.MethodDelete
-		localVarPostBody   interface{}
-		formFiles          []formFile
+		localVarHTTPMethod   = http.MethodDelete
+		localVarPostBody     interface{}
+		formFiles            []formFile
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "MachineAPIService.DeleteMachine")
@@ -120,8 +121,8 @@ func (a *MachineAPIService) DeleteMachineExecute(r ApiDeleteMachineRequest) (*ht
 				newErr.error = err.Error()
 				return localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 			return localVarHTTPResponse, newErr
 		}
 		if localVarHTTPResponse.StatusCode == 403 {
@@ -131,8 +132,8 @@ func (a *MachineAPIService) DeleteMachineExecute(r ApiDeleteMachineRequest) (*ht
 				newErr.error = err.Error()
 				return localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 			return localVarHTTPResponse, newErr
 		}
 		if localVarHTTPResponse.StatusCode == 404 {
@@ -142,8 +143,8 @@ func (a *MachineAPIService) DeleteMachineExecute(r ApiDeleteMachineRequest) (*ht
 				newErr.error = err.Error()
 				return localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 			return localVarHTTPResponse, newErr
 		}
 		if localVarHTTPResponse.StatusCode == 422 {
@@ -153,8 +154,8 @@ func (a *MachineAPIService) DeleteMachineExecute(r ApiDeleteMachineRequest) (*ht
 				newErr.error = err.Error()
 				return localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 			return localVarHTTPResponse, newErr
 		}
 		if localVarHTTPResponse.StatusCode == 500 {
@@ -164,8 +165,8 @@ func (a *MachineAPIService) DeleteMachineExecute(r ApiDeleteMachineRequest) (*ht
 				newErr.error = err.Error()
 				return localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 		}
 		return localVarHTTPResponse, newErr
 	}
@@ -174,23 +175,23 @@ func (a *MachineAPIService) DeleteMachineExecute(r ApiDeleteMachineRequest) (*ht
 }
 
 type ApiGetAllMachineRequest struct {
-	ctx             context.Context
-	ApiService      *MachineAPIService
-	org             string
-	siteId          *string
-	id              *string
+	ctx context.Context
+	ApiService *MachineAPIService
+	org string
+	siteId *string
+	id *string
 	hasInstanceType *bool
-	instanceTypeId  *string
+	instanceTypeId *string
 	includeMetadata *bool
-	status          *string
-	capabilityType  *string
-	capabilityName  *string
+	status *string
+	capabilityType *string
+	capabilityName *string
 	hwSkuDeviceType *string
-	query           *string
+	query *string
 	includeRelation *string
-	pageNumber      *int32
-	pageSize        *int32
-	orderBy         *string
+	pageNumber *int32
+	pageSize *int32
+	orderBy *string
 }
 
 // Filter Machines by Site ID
@@ -288,27 +289,27 @@ Get all Machines for Infrastructure Provider.
 
 Org must have an Infrastructure Provider entity. User must have `FORGE_PROVIDER_ADMIN` authorization role.
 
-	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
-	@param org Name of the Org
-	@return ApiGetAllMachineRequest
+
+ @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+ @param org Name of the Org
+ @return ApiGetAllMachineRequest
 */
 func (a *MachineAPIService) GetAllMachine(ctx context.Context, org string) ApiGetAllMachineRequest {
 	return ApiGetAllMachineRequest{
 		ApiService: a,
-		ctx:        ctx,
-		org:        org,
+		ctx: ctx,
+		org: org,
 	}
 }
 
 // Execute executes the request
-//
-//	@return []Machine
+//  @return []Machine
 func (a *MachineAPIService) GetAllMachineExecute(r ApiGetAllMachineRequest) ([]Machine, *http.Response, error) {
 	var (
-		localVarHTTPMethod  = http.MethodGet
-		localVarPostBody    interface{}
-		formFiles           []formFile
-		localVarReturnValue []Machine
+		localVarHTTPMethod   = http.MethodGet
+		localVarPostBody     interface{}
+		formFiles            []formFile
+		localVarReturnValue  []Machine
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "MachineAPIService.GetAllMachine")
@@ -415,8 +416,8 @@ func (a *MachineAPIService) GetAllMachineExecute(r ApiGetAllMachineRequest) ([]M
 				newErr.error = err.Error()
 				return localVarReturnValue, localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 		}
 		return localVarReturnValue, localVarHTTPResponse, newErr
 	}
@@ -434,21 +435,21 @@ func (a *MachineAPIService) GetAllMachineExecute(r ApiGetAllMachineRequest) ([]M
 }
 
 type ApiGetAllMachineCapabilitiesRequest struct {
-	ctx             context.Context
-	ApiService      *MachineAPIService
-	siteId          *string
-	org             string
+	ctx context.Context
+	ApiService *MachineAPIService
+	siteId *string
+	org string
 	hasInstanceType *bool
-	type_           *string
-	name            *string
-	frequency       *string
-	capacity        *string
-	vendor          *string
+	type_ *string
+	name *string
+	frequency *string
+	capacity *string
+	vendor *string
 	inactiveDevices *string
-	count           *string
-	pageNumber      *int32
-	pageSize        *int32
-	orderBy         *string
+	count *string
+	pageNumber *int32
+	pageSize *int32
+	orderBy *string
 }
 
 // Filter Capabilities by Machines from a particular Site
@@ -530,31 +531,31 @@ func (r ApiGetAllMachineCapabilitiesRequest) Execute() ([]MachineCapability, *ht
 /*
 GetAllMachineCapabilities Retrieve all Machine Capabilities
 
-# Get all distinct Machine Capabilities across all Machines
+Get all distinct Machine Capabilities across all Machines
 
 Org must have an Infrastructure Provider entity. User must have `FORGE_PROVIDER_ADMIN` authorization role.
 
-	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
-	@param org Name of the Org
-	@return ApiGetAllMachineCapabilitiesRequest
+
+ @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+ @param org Name of the Org
+ @return ApiGetAllMachineCapabilitiesRequest
 */
 func (a *MachineAPIService) GetAllMachineCapabilities(ctx context.Context, org string) ApiGetAllMachineCapabilitiesRequest {
 	return ApiGetAllMachineCapabilitiesRequest{
 		ApiService: a,
-		ctx:        ctx,
-		org:        org,
+		ctx: ctx,
+		org: org,
 	}
 }
 
 // Execute executes the request
-//
-//	@return []MachineCapability
+//  @return []MachineCapability
 func (a *MachineAPIService) GetAllMachineCapabilitiesExecute(r ApiGetAllMachineCapabilitiesRequest) ([]MachineCapability, *http.Response, error) {
 	var (
-		localVarHTTPMethod  = http.MethodGet
-		localVarPostBody    interface{}
-		formFiles           []formFile
-		localVarReturnValue []MachineCapability
+		localVarHTTPMethod   = http.MethodGet
+		localVarPostBody     interface{}
+		formFiles            []formFile
+		localVarReturnValue  []MachineCapability
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "MachineAPIService.GetAllMachineCapabilities")
@@ -656,8 +657,8 @@ func (a *MachineAPIService) GetAllMachineCapabilitiesExecute(r ApiGetAllMachineC
 				newErr.error = err.Error()
 				return localVarReturnValue, localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 		}
 		return localVarReturnValue, localVarHTTPResponse, newErr
 	}
@@ -675,10 +676,10 @@ func (a *MachineAPIService) GetAllMachineCapabilitiesExecute(r ApiGetAllMachineC
 }
 
 type ApiGetMachineRequest struct {
-	ctx             context.Context
-	ApiService      *MachineAPIService
-	org             string
-	machineId       string
+	ctx context.Context
+	ApiService *MachineAPIService
+	org string
+	machineId string
 	includeRelation *string
 	includeMetadata *bool
 }
@@ -708,29 +709,29 @@ If org has an Infrastructure Provider entity, then a user with `FORGE_PROVIDER_A
 
 If org has a Tenant entity, then a user with `FORGE_TENANT_ADMIN` role can request details for any Machine associated with Tenant's active Instances.
 
-	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
-	@param org Name of the Org
-	@param machineId ID of the Machine
-	@return ApiGetMachineRequest
+
+ @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+ @param org Name of the Org
+ @param machineId ID of the Machine
+ @return ApiGetMachineRequest
 */
 func (a *MachineAPIService) GetMachine(ctx context.Context, org string, machineId string) ApiGetMachineRequest {
 	return ApiGetMachineRequest{
 		ApiService: a,
-		ctx:        ctx,
-		org:        org,
-		machineId:  machineId,
+		ctx: ctx,
+		org: org,
+		machineId: machineId,
 	}
 }
 
 // Execute executes the request
-//
-//	@return Machine
+//  @return Machine
 func (a *MachineAPIService) GetMachineExecute(r ApiGetMachineRequest) (*Machine, *http.Response, error) {
 	var (
-		localVarHTTPMethod  = http.MethodGet
-		localVarPostBody    interface{}
-		formFiles           []formFile
-		localVarReturnValue *Machine
+		localVarHTTPMethod   = http.MethodGet
+		localVarPostBody     interface{}
+		formFiles            []formFile
+		localVarReturnValue  *Machine
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "MachineAPIService.GetMachine")
@@ -798,8 +799,8 @@ func (a *MachineAPIService) GetMachineExecute(r ApiGetMachineRequest) (*Machine,
 				newErr.error = err.Error()
 				return localVarReturnValue, localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 		}
 		return localVarReturnValue, localVarHTTPResponse, newErr
 	}
@@ -817,13 +818,13 @@ func (a *MachineAPIService) GetMachineExecute(r ApiGetMachineRequest) (*Machine,
 }
 
 type ApiGetMachineStatusHistoryRequest struct {
-	ctx        context.Context
+	ctx context.Context
 	ApiService *MachineAPIService
-	org        string
-	machineId  string
+	org string
+	machineId string
 	pageNumber *int32
-	pageSize   *int32
-	orderBy    *string
+	pageSize *int32
+	orderBy *string
 }
 
 // Page number for pagination query
@@ -857,29 +858,29 @@ If org has an Infrastructure Provider entity, then a user with `FORGE_PROVIDER_A
 
 If org has a Tenant entity, then a user with `FORGE_TENANT_ADMIN` role can request details for any Machine associated with Tenant's active Instances.
 
-	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
-	@param org Name of the Org
-	@param machineId ID of the Machine
-	@return ApiGetMachineStatusHistoryRequest
+
+ @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+ @param org Name of the Org
+ @param machineId ID of the Machine
+ @return ApiGetMachineStatusHistoryRequest
 */
 func (a *MachineAPIService) GetMachineStatusHistory(ctx context.Context, org string, machineId string) ApiGetMachineStatusHistoryRequest {
 	return ApiGetMachineStatusHistoryRequest{
 		ApiService: a,
-		ctx:        ctx,
-		org:        org,
-		machineId:  machineId,
+		ctx: ctx,
+		org: org,
+		machineId: machineId,
 	}
 }
 
 // Execute executes the request
-//
-//	@return []StatusDetail
+//  @return []StatusDetail
 func (a *MachineAPIService) GetMachineStatusHistoryExecute(r ApiGetMachineStatusHistoryRequest) ([]StatusDetail, *http.Response, error) {
 	var (
-		localVarHTTPMethod  = http.MethodGet
-		localVarPostBody    interface{}
-		formFiles           []formFile
-		localVarReturnValue []StatusDetail
+		localVarHTTPMethod   = http.MethodGet
+		localVarPostBody     interface{}
+		formFiles            []formFile
+		localVarReturnValue  []StatusDetail
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "MachineAPIService.GetMachineStatusHistory")
@@ -950,8 +951,8 @@ func (a *MachineAPIService) GetMachineStatusHistoryExecute(r ApiGetMachineStatus
 				newErr.error = err.Error()
 				return localVarReturnValue, localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 		}
 		return localVarReturnValue, localVarHTTPResponse, newErr
 	}
@@ -969,10 +970,10 @@ func (a *MachineAPIService) GetMachineStatusHistoryExecute(r ApiGetMachineStatus
 }
 
 type ApiUpdateMachineRequest struct {
-	ctx                  context.Context
-	ApiService           *MachineAPIService
-	org                  string
-	machineId            string
+	ctx context.Context
+	ApiService *MachineAPIService
+	org string
+	machineId string
 	machineUpdateRequest *MachineUpdateRequest
 }
 
@@ -988,35 +989,35 @@ func (r ApiUpdateMachineRequest) Execute() (*Machine, *http.Response, error) {
 /*
 UpdateMachine Update Machine
 
-# Update a Machine
+Update a Machine
 
 Instance Type attribute updates, maintenance attribute updates and labels updates must be specified in separate requests. They cannot be proceessed at the same time.
 
 Some attributes can only be updated by Provider, while others can be updated by Provider or a Privileged Tenant.
 
-	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
-	@param org Name of the Org
-	@param machineId ID of the Machine
-	@return ApiUpdateMachineRequest
+
+ @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+ @param org Name of the Org
+ @param machineId ID of the Machine
+ @return ApiUpdateMachineRequest
 */
 func (a *MachineAPIService) UpdateMachine(ctx context.Context, org string, machineId string) ApiUpdateMachineRequest {
 	return ApiUpdateMachineRequest{
 		ApiService: a,
-		ctx:        ctx,
-		org:        org,
-		machineId:  machineId,
+		ctx: ctx,
+		org: org,
+		machineId: machineId,
 	}
 }
 
 // Execute executes the request
-//
-//	@return Machine
+//  @return Machine
 func (a *MachineAPIService) UpdateMachineExecute(r ApiUpdateMachineRequest) (*Machine, *http.Response, error) {
 	var (
-		localVarHTTPMethod  = http.MethodPatch
-		localVarPostBody    interface{}
-		formFiles           []formFile
-		localVarReturnValue *Machine
+		localVarHTTPMethod   = http.MethodPatch
+		localVarPostBody     interface{}
+		formFiles            []formFile
+		localVarReturnValue  *Machine
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "MachineAPIService.UpdateMachine")

@@ -20,21 +20,22 @@ import (
 	"strings"
 )
 
+
 // RackAPIService RackAPI service
 type RackAPIService service
 
 type ApiGetAllRackRequest struct {
-	ctx               context.Context
-	ApiService        *RackAPIService
-	siteId            *string
-	org               string
+	ctx context.Context
+	ApiService *RackAPIService
+	siteId *string
+	org string
 	includeComponents *bool
-	name              *string
-	manufacturer      *string
-	model             *string
-	pageNumber        *int32
-	pageSize          *int32
-	orderBy           *string
+	name *string
+	manufacturer *string
+	model *string
+	pageNumber *int32
+	pageSize *int32
+	orderBy *string
 }
 
 // ID of the Site to retrieve Racks from
@@ -96,27 +97,26 @@ Get all Racks for the specified Site.
 
 Org must have an Infrastructure Provider entity. User must have `FORGE_PROVIDER_ADMIN` authorization role.
 
-	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
-	@param org Name of the Org
-	@return ApiGetAllRackRequest
+ @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+ @param org Name of the Org
+ @return ApiGetAllRackRequest
 */
 func (a *RackAPIService) GetAllRack(ctx context.Context, org string) ApiGetAllRackRequest {
 	return ApiGetAllRackRequest{
 		ApiService: a,
-		ctx:        ctx,
-		org:        org,
+		ctx: ctx,
+		org: org,
 	}
 }
 
 // Execute executes the request
-//
-//	@return []Rack
+//  @return []Rack
 func (a *RackAPIService) GetAllRackExecute(r ApiGetAllRackRequest) ([]Rack, *http.Response, error) {
 	var (
-		localVarHTTPMethod  = http.MethodGet
-		localVarPostBody    interface{}
-		formFiles           []formFile
-		localVarReturnValue []Rack
+		localVarHTTPMethod   = http.MethodGet
+		localVarPostBody     interface{}
+		formFiles            []formFile
+		localVarReturnValue  []Rack
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "RackAPIService.GetAllRack")
@@ -206,8 +206,8 @@ func (a *RackAPIService) GetAllRackExecute(r ApiGetAllRackRequest) ([]Rack, *htt
 				newErr.error = err.Error()
 				return localVarReturnValue, localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 		}
 		return localVarReturnValue, localVarHTTPResponse, newErr
 	}
@@ -225,11 +225,11 @@ func (a *RackAPIService) GetAllRackExecute(r ApiGetAllRackRequest) ([]Rack, *htt
 }
 
 type ApiGetRackRequest struct {
-	ctx               context.Context
-	ApiService        *RackAPIService
-	siteId            *string
-	org               string
-	id                string
+	ctx context.Context
+	ApiService *RackAPIService
+	siteId *string
+	org string
+	id string
 	includeComponents *bool
 }
 
@@ -256,29 +256,28 @@ Get a Rack by ID.
 
 Org must have an Infrastructure Provider entity. User must have `FORGE_PROVIDER_ADMIN` authorization role.
 
-	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
-	@param org Name of the Org
-	@param id ID of the Rack
-	@return ApiGetRackRequest
+ @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
+ @param org Name of the Org
+ @param id ID of the Rack
+ @return ApiGetRackRequest
 */
 func (a *RackAPIService) GetRack(ctx context.Context, org string, id string) ApiGetRackRequest {
 	return ApiGetRackRequest{
 		ApiService: a,
-		ctx:        ctx,
-		org:        org,
-		id:         id,
+		ctx: ctx,
+		org: org,
+		id: id,
 	}
 }
 
 // Execute executes the request
-//
-//	@return Rack
+//  @return Rack
 func (a *RackAPIService) GetRackExecute(r ApiGetRackRequest) (*Rack, *http.Response, error) {
 	var (
-		localVarHTTPMethod  = http.MethodGet
-		localVarPostBody    interface{}
-		formFiles           []formFile
-		localVarReturnValue *Rack
+		localVarHTTPMethod   = http.MethodGet
+		localVarPostBody     interface{}
+		formFiles            []formFile
+		localVarReturnValue  *Rack
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "RackAPIService.GetRack")
@@ -347,8 +346,8 @@ func (a *RackAPIService) GetRackExecute(r ApiGetRackRequest) (*Rack, *http.Respo
 				newErr.error = err.Error()
 				return localVarReturnValue, localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 			return localVarReturnValue, localVarHTTPResponse, newErr
 		}
 		if localVarHTTPResponse.StatusCode == 404 {
@@ -358,8 +357,8 @@ func (a *RackAPIService) GetRackExecute(r ApiGetRackRequest) (*Rack, *http.Respo
 				newErr.error = err.Error()
 				return localVarReturnValue, localVarHTTPResponse, newErr
 			}
-			newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
-			newErr.model = v
+					newErr.error = formatErrorMessage(localVarHTTPResponse.Status, &v)
+					newErr.model = v
 		}
 		return localVarReturnValue, localVarHTTPResponse, newErr
 	}

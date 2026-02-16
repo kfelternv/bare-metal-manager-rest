@@ -296,7 +296,6 @@ func (o *VPC) HasControllerVpcId() bool {
 func (o *VPC) SetControllerVpcId(v string) {
 	o.ControllerVpcId.Set(&v)
 }
-
 // SetControllerVpcIdNil sets the value for ControllerVpcId to be an explicit nil
 func (o *VPC) SetControllerVpcIdNil() {
 	o.ControllerVpcId.Set(nil)
@@ -371,7 +370,6 @@ func (o *VPC) HasNetworkSecurityGroupId() bool {
 func (o *VPC) SetNetworkSecurityGroupId(v string) {
 	o.NetworkSecurityGroupId.Set(&v)
 }
-
 // SetNetworkSecurityGroupIdNil sets the value for NetworkSecurityGroupId to be an explicit nil
 func (o *VPC) SetNetworkSecurityGroupIdNil() {
 	o.NetworkSecurityGroupId.Set(nil)
@@ -446,7 +444,6 @@ func (o *VPC) HasNvLinkLogicalPartitionId() bool {
 func (o *VPC) SetNvLinkLogicalPartitionId(v string) {
 	o.NvLinkLogicalPartitionId.Set(&v)
 }
-
 // SetNvLinkLogicalPartitionIdNil sets the value for NvLinkLogicalPartitionId to be an explicit nil
 func (o *VPC) SetNvLinkLogicalPartitionIdNil() {
 	o.NvLinkLogicalPartitionId.Set(nil)
@@ -618,7 +615,7 @@ func (o *VPC) SetUpdated(v time.Time) {
 }
 
 func (o VPC) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -713,3 +710,5 @@ func (v *NullableVPC) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

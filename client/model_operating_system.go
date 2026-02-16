@@ -218,7 +218,6 @@ func (o *OperatingSystem) HasInfrastructureProviderId() bool {
 func (o *OperatingSystem) SetInfrastructureProviderId(v string) {
 	o.InfrastructureProviderId.Set(&v)
 }
-
 // SetInfrastructureProviderIdNil sets the value for InfrastructureProviderId to be an explicit nil
 func (o *OperatingSystem) SetInfrastructureProviderIdNil() {
 	o.InfrastructureProviderId.Set(nil)
@@ -261,7 +260,6 @@ func (o *OperatingSystem) HasTenantId() bool {
 func (o *OperatingSystem) SetTenantId(v string) {
 	o.TenantId.Set(&v)
 }
-
 // SetTenantIdNil sets the value for TenantId to be an explicit nil
 func (o *OperatingSystem) SetTenantIdNil() {
 	o.TenantId.Set(nil)
@@ -336,7 +334,6 @@ func (o *OperatingSystem) HasImageUrl() bool {
 func (o *OperatingSystem) SetImageUrl(v string) {
 	o.ImageUrl.Set(&v)
 }
-
 // SetImageUrlNil sets the value for ImageUrl to be an explicit nil
 func (o *OperatingSystem) SetImageUrlNil() {
 	o.ImageUrl.Set(nil)
@@ -379,7 +376,6 @@ func (o *OperatingSystem) HasImageSha() bool {
 func (o *OperatingSystem) SetImageSha(v string) {
 	o.ImageSha.Set(&v)
 }
-
 // SetImageShaNil sets the value for ImageSha to be an explicit nil
 func (o *OperatingSystem) SetImageShaNil() {
 	o.ImageSha.Set(nil)
@@ -422,7 +418,6 @@ func (o *OperatingSystem) HasImageAuthType() bool {
 func (o *OperatingSystem) SetImageAuthType(v string) {
 	o.ImageAuthType.Set(&v)
 }
-
 // SetImageAuthTypeNil sets the value for ImageAuthType to be an explicit nil
 func (o *OperatingSystem) SetImageAuthTypeNil() {
 	o.ImageAuthType.Set(nil)
@@ -465,7 +460,6 @@ func (o *OperatingSystem) HasImageAuthToken() bool {
 func (o *OperatingSystem) SetImageAuthToken(v string) {
 	o.ImageAuthToken.Set(&v)
 }
-
 // SetImageAuthTokenNil sets the value for ImageAuthToken to be an explicit nil
 func (o *OperatingSystem) SetImageAuthTokenNil() {
 	o.ImageAuthToken.Set(nil)
@@ -508,7 +502,6 @@ func (o *OperatingSystem) HasImageDisk() bool {
 func (o *OperatingSystem) SetImageDisk(v string) {
 	o.ImageDisk.Set(&v)
 }
-
 // SetImageDiskNil sets the value for ImageDisk to be an explicit nil
 func (o *OperatingSystem) SetImageDiskNil() {
 	o.ImageDisk.Set(nil)
@@ -551,7 +544,6 @@ func (o *OperatingSystem) HasRootFsId() bool {
 func (o *OperatingSystem) SetRootFsId(v string) {
 	o.RootFsId.Set(&v)
 }
-
 // SetRootFsIdNil sets the value for RootFsId to be an explicit nil
 func (o *OperatingSystem) SetRootFsIdNil() {
 	o.RootFsId.Set(nil)
@@ -594,7 +586,6 @@ func (o *OperatingSystem) HasRootFsLabel() bool {
 func (o *OperatingSystem) SetRootFsLabel(v string) {
 	o.RootFsLabel.Set(&v)
 }
-
 // SetRootFsLabelNil sets the value for RootFsLabel to be an explicit nil
 func (o *OperatingSystem) SetRootFsLabelNil() {
 	o.RootFsLabel.Set(nil)
@@ -637,7 +628,6 @@ func (o *OperatingSystem) HasIpxeScript() bool {
 func (o *OperatingSystem) SetIpxeScript(v string) {
 	o.IpxeScript.Set(&v)
 }
-
 // SetIpxeScriptNil sets the value for IpxeScript to be an explicit nil
 func (o *OperatingSystem) SetIpxeScriptNil() {
 	o.IpxeScript.Set(nil)
@@ -680,7 +670,6 @@ func (o *OperatingSystem) HasUserData() bool {
 func (o *OperatingSystem) SetUserData(v string) {
 	o.UserData.Set(&v)
 }
-
 // SetUserDataNil sets the value for UserData to be an explicit nil
 func (o *OperatingSystem) SetUserDataNil() {
 	o.UserData.Set(nil)
@@ -819,7 +808,6 @@ func (o *OperatingSystem) HasDeactivationNote() bool {
 func (o *OperatingSystem) SetDeactivationNote(v string) {
 	o.DeactivationNote.Set(&v)
 }
-
 // SetDeactivationNoteNil sets the value for DeactivationNote to be an explicit nil
 func (o *OperatingSystem) SetDeactivationNoteNil() {
 	o.DeactivationNote.Set(nil)
@@ -1023,7 +1011,7 @@ func (o *OperatingSystem) SetUpdated(v time.Time) {
 }
 
 func (o OperatingSystem) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -1145,3 +1133,5 @@ func (v *NullableOperatingSystem) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

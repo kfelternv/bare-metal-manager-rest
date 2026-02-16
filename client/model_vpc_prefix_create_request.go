@@ -12,8 +12,8 @@ Contact: carbide-dev@exchange.nvidia.com
 package client
 
 import (
-	"bytes"
 	"encoding/json"
+	"bytes"
 	"fmt"
 )
 
@@ -25,9 +25,9 @@ type VpcPrefixCreateRequest struct {
 	// Human readable name for the VPC Prefix
 	Name string `json:"name"`
 	// ID of the VPC
-	VpcId        string  `json:"vpcId"`
-	IpBlockId    *string `json:"ipBlockId,omitempty"`
-	PrefixLength int32   `json:"prefixLength"`
+	VpcId string `json:"vpcId"`
+	IpBlockId *string `json:"ipBlockId,omitempty"`
+	PrefixLength int32 `json:"prefixLength"`
 }
 
 type _VpcPrefixCreateRequest VpcPrefixCreateRequest
@@ -157,7 +157,7 @@ func (o *VpcPrefixCreateRequest) SetPrefixLength(v int32) {
 }
 
 func (o VpcPrefixCreateRequest) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -190,10 +190,10 @@ func (o *VpcPrefixCreateRequest) UnmarshalJSON(data []byte) (err error) {
 	err = json.Unmarshal(data, &allProperties)
 
 	if err != nil {
-		return err
+		return err;
 	}
 
-	for _, requiredProperty := range requiredProperties {
+	for _, requiredProperty := range(requiredProperties) {
 		if _, exists := allProperties[requiredProperty]; !exists {
 			return fmt.Errorf("no value given for required property %v", requiredProperty)
 		}
@@ -249,3 +249,5 @@ func (v *NullableVpcPrefixCreateRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

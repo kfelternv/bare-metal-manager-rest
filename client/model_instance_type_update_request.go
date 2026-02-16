@@ -20,8 +20,8 @@ var _ MappedNullable = &InstanceTypeUpdateRequest{}
 
 // InstanceTypeUpdateRequest Request data to update an Instance Type
 type InstanceTypeUpdateRequest struct {
-	Name                *string             `json:"name,omitempty"`
-	Description         *string             `json:"description,omitempty"`
+	Name *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
 	MachineCapabilities []MachineCapability `json:"machineCapabilities,omitempty"`
 }
 
@@ -139,7 +139,7 @@ func (o *InstanceTypeUpdateRequest) SetMachineCapabilities(v []MachineCapability
 }
 
 func (o InstanceTypeUpdateRequest) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -195,3 +195,5 @@ func (v *NullableInstanceTypeUpdateRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

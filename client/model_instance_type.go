@@ -21,22 +21,22 @@ var _ MappedNullable = &InstanceType{}
 
 // InstanceType Instance types describe a set of machines that match a certain criteria
 type InstanceType struct {
-	Id                       *string             `json:"id,omitempty"`
-	Name                     *string             `json:"name,omitempty"`
-	Description              *string             `json:"description,omitempty"`
-	ControllerMachineType    *string             `json:"controllerMachineType,omitempty"`
-	InfrastructureProviderId *string             `json:"infrastructureProviderId,omitempty"`
-	SiteId                   *string             `json:"siteId,omitempty"`
-	MachineCapabilities      []MachineCapability `json:"machineCapabilities,omitempty"`
+	Id *string `json:"id,omitempty"`
+	Name *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	ControllerMachineType *string `json:"controllerMachineType,omitempty"`
+	InfrastructureProviderId *string `json:"infrastructureProviderId,omitempty"`
+	SiteId *string `json:"siteId,omitempty"`
+	MachineCapabilities []MachineCapability `json:"machineCapabilities,omitempty"`
 	// Available only for Providers
 	MachineInstanceTypes []MachineInstanceType `json:"machineInstanceTypes,omitempty"`
 	// Currently only available for Tenants
 	AllocationStats *InstanceTypeAllocationStats `json:"allocationStats,omitempty"`
-	Status          *InstanceTypeStatus          `json:"status,omitempty"`
-	StatusHistory   []StatusDetail               `json:"statusHistory,omitempty"`
-	Deprecations    []Deprecation                `json:"deprecations,omitempty"`
-	Created         *time.Time                   `json:"created,omitempty"`
-	Updated         *time.Time                   `json:"updated,omitempty"`
+	Status *InstanceTypeStatus `json:"status,omitempty"`
+	StatusHistory []StatusDetail `json:"statusHistory,omitempty"`
+	Deprecations []Deprecation `json:"deprecations,omitempty"`
+	Created *time.Time `json:"created,omitempty"`
+	Updated *time.Time `json:"updated,omitempty"`
 }
 
 // NewInstanceType instantiates a new InstanceType object
@@ -505,7 +505,7 @@ func (o *InstanceType) SetUpdated(v time.Time) {
 }
 
 func (o InstanceType) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -594,3 +594,5 @@ func (v *NullableInstanceType) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

@@ -160,7 +160,6 @@ func (o *SshKeyGroup) HasDescription() bool {
 func (o *SshKeyGroup) SetDescription(v string) {
 	o.Description.Set(&v)
 }
-
 // SetDescriptionNil sets the value for Description to be an explicit nil
 func (o *SshKeyGroup) SetDescriptionNil() {
 	o.Description.Set(nil)
@@ -460,7 +459,7 @@ func (o *SshKeyGroup) SetUpdated(v time.Time) {
 }
 
 func (o SshKeyGroup) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -543,3 +542,5 @@ func (v *NullableSshKeyGroup) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

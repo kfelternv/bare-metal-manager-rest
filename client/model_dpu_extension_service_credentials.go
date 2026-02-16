@@ -109,7 +109,6 @@ func (o *DpuExtensionServiceCredentials) HasUsername() bool {
 func (o *DpuExtensionServiceCredentials) SetUsername(v string) {
 	o.Username.Set(&v)
 }
-
 // SetUsernameNil sets the value for Username to be an explicit nil
 func (o *DpuExtensionServiceCredentials) SetUsernameNil() {
 	o.Username.Set(nil)
@@ -152,7 +151,6 @@ func (o *DpuExtensionServiceCredentials) HasPassword() bool {
 func (o *DpuExtensionServiceCredentials) SetPassword(v string) {
 	o.Password.Set(&v)
 }
-
 // SetPasswordNil sets the value for Password to be an explicit nil
 func (o *DpuExtensionServiceCredentials) SetPasswordNil() {
 	o.Password.Set(nil)
@@ -164,7 +162,7 @@ func (o *DpuExtensionServiceCredentials) UnsetPassword() {
 }
 
 func (o DpuExtensionServiceCredentials) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -220,3 +218,5 @@ func (v *NullableDpuExtensionServiceCredentials) UnmarshalJSON(src []byte) error
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

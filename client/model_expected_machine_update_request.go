@@ -87,7 +87,6 @@ func (o *ExpectedMachineUpdateRequest) HasId() bool {
 func (o *ExpectedMachineUpdateRequest) SetId(v string) {
 	o.Id.Set(&v)
 }
-
 // SetIdNil sets the value for Id to be an explicit nil
 func (o *ExpectedMachineUpdateRequest) SetIdNil() {
 	o.Id.Set(nil)
@@ -130,7 +129,6 @@ func (o *ExpectedMachineUpdateRequest) HasBmcMacAddress() bool {
 func (o *ExpectedMachineUpdateRequest) SetBmcMacAddress(v string) {
 	o.BmcMacAddress.Set(&v)
 }
-
 // SetBmcMacAddressNil sets the value for BmcMacAddress to be an explicit nil
 func (o *ExpectedMachineUpdateRequest) SetBmcMacAddressNil() {
 	o.BmcMacAddress.Set(nil)
@@ -173,7 +171,6 @@ func (o *ExpectedMachineUpdateRequest) HasBmcUsername() bool {
 func (o *ExpectedMachineUpdateRequest) SetBmcUsername(v string) {
 	o.BmcUsername.Set(&v)
 }
-
 // SetBmcUsernameNil sets the value for BmcUsername to be an explicit nil
 func (o *ExpectedMachineUpdateRequest) SetBmcUsernameNil() {
 	o.BmcUsername.Set(nil)
@@ -216,7 +213,6 @@ func (o *ExpectedMachineUpdateRequest) HasBmcPassword() bool {
 func (o *ExpectedMachineUpdateRequest) SetBmcPassword(v string) {
 	o.BmcPassword.Set(&v)
 }
-
 // SetBmcPasswordNil sets the value for BmcPassword to be an explicit nil
 func (o *ExpectedMachineUpdateRequest) SetBmcPasswordNil() {
 	o.BmcPassword.Set(nil)
@@ -259,7 +255,6 @@ func (o *ExpectedMachineUpdateRequest) HasChassisSerialNumber() bool {
 func (o *ExpectedMachineUpdateRequest) SetChassisSerialNumber(v string) {
 	o.ChassisSerialNumber.Set(&v)
 }
-
 // SetChassisSerialNumberNil sets the value for ChassisSerialNumber to be an explicit nil
 func (o *ExpectedMachineUpdateRequest) SetChassisSerialNumberNil() {
 	o.ChassisSerialNumber.Set(nil)
@@ -335,7 +330,6 @@ func (o *ExpectedMachineUpdateRequest) HasSkuId() bool {
 func (o *ExpectedMachineUpdateRequest) SetSkuId(v string) {
 	o.SkuId.Set(&v)
 }
-
 // SetSkuIdNil sets the value for SkuId to be an explicit nil
 func (o *ExpectedMachineUpdateRequest) SetSkuIdNil() {
 	o.SkuId.Set(nil)
@@ -379,7 +373,7 @@ func (o *ExpectedMachineUpdateRequest) SetLabels(v map[string]string) {
 }
 
 func (o ExpectedMachineUpdateRequest) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -450,3 +444,5 @@ func (v *NullableExpectedMachineUpdateRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

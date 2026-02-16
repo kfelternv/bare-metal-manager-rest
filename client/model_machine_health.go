@@ -111,7 +111,6 @@ func (o *MachineHealth) HasObservedAt() bool {
 func (o *MachineHealth) SetObservedAt(v string) {
 	o.ObservedAt.Set(&v)
 }
-
 // SetObservedAtNil sets the value for ObservedAt to be an explicit nil
 func (o *MachineHealth) SetObservedAtNil() {
 	o.ObservedAt.Set(nil)
@@ -187,7 +186,7 @@ func (o *MachineHealth) SetAlerts(v []MachineHealthProbeAlert) {
 }
 
 func (o MachineHealth) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -246,3 +245,5 @@ func (v *NullableMachineHealth) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+
