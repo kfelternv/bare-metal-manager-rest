@@ -113,32 +113,107 @@ type Command struct {
 	Run         func(s *Session, args []string) error
 }
 
+// -- Factory functions --
+
+// makeTUIGet creates a generic get handler that resolves a resource and fetches its details.
+func makeTUIGet(resourceKey, displayName string, fetchFn func(s *Session, id string) (interface{}, error)) func(*Session, []string) error {
+	return func(s *Session, args []string) error {
+		item, err := s.Resolver.ResolveWithArgs(s.Ctx, resourceKey, displayName, args)
+		if err != nil {
+			return err
+		}
+		LogCmd(resourceKey, "get", item.ID)
+		result, err := fetchFn(s, item.ID)
+		if err != nil {
+			return fmt.Errorf("getting %s: %w", displayName, err)
+		}
+		return printDetailJSON(os.Stdout, result)
+	}
+}
+
+// makeTUIDelete creates a generic delete handler with confirmation.
+func makeTUIDelete(resourceKey, displayName string, deleteFn func(s *Session, id string) error) func(*Session, []string) error {
+	return func(s *Session, args []string) error {
+		item, err := s.Resolver.ResolveWithArgs(s.Ctx, resourceKey, displayName+" to delete", args)
+		if err != nil {
+			return err
+		}
+		ok, err := PromptConfirm(fmt.Sprintf("Delete %s %s (%s)?", displayName, item.Name, item.ID))
+		if err != nil || !ok {
+			return err
+		}
+		LogCmd(resourceKey, "delete", item.ID)
+		if err := deleteFn(s, item.ID); err != nil {
+			return fmt.Errorf("deleting %s: %w", displayName, err)
+		}
+		s.Cache.Invalidate(resourceKey)
+		fmt.Printf("%s %s deleted: %s\n", Green("OK"), displayName, item.Name)
+		return nil
+	}
+}
+
+// makeTUIList creates a simple list handler that prints NAME/STATUS/ID.
+func makeTUIList(resourceKey string) func(*Session, []string) error {
+	return func(s *Session, args []string) error {
+		LogScopedCmd(s, resourceKey, "list")
+		items, err := s.Resolver.Fetch(s.Ctx, resourceKey)
+		if err != nil {
+			return err
+		}
+		return printResourceTable(os.Stdout, "NAME", "STATUS", "ID", items)
+	}
+}
+
 // AllCommands returns all available commands
 func AllCommands() []Command {
 	return []Command{
 		// Site
-		{Name: "site list", Description: "List all sites", Run: cmdSiteList},
-		{Name: "site get", Description: "Get site details", Run: cmdSiteGet},
-		{Name: "site delete", Description: "Delete a site", Run: cmdSiteDelete},
+		{Name: "site list", Description: "List all sites", Run: makeTUIList("site")},
+		{Name: "site get", Description: "Get site details", Run: makeTUIGet("site", "Site", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.SiteAPI.GetSite(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
+		{Name: "site delete", Description: "Delete a site", Run: makeTUIDelete("site", "Site", func(s *Session, id string) error {
+			_, err := s.Client.SiteAPI.DeleteSite(s.Ctx, s.Org, id).Execute()
+			return err
+		})},
 
 		// VPC
 		{Name: "vpc list", Description: "List all VPCs", Run: cmdVPCList},
-		{Name: "vpc get", Description: "Get VPC details", Run: cmdVPCGet},
+		{Name: "vpc get", Description: "Get VPC details", Run: makeTUIGet("vpc", "VPC", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.VPCAPI.GetVpc(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 		{Name: "vpc create", Description: "Create a VPC", Run: cmdVPCCreate},
-		{Name: "vpc delete", Description: "Delete a VPC", Run: cmdVPCDelete},
+		{Name: "vpc delete", Description: "Delete a VPC", Run: makeTUIDelete("vpc", "VPC", func(s *Session, id string) error {
+			_, err := s.Client.VPCAPI.DeleteVpc(s.Ctx, s.Org, id).Execute()
+			return err
+		})},
 
 		// Subnet
 		{Name: "subnet list", Description: "List all subnets", Run: cmdSubnetList},
-		{Name: "subnet get", Description: "Get subnet details", Run: cmdSubnetGet},
+		{Name: "subnet get", Description: "Get subnet details", Run: makeTUIGet("subnet", "Subnet", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.SubnetAPI.GetSubnet(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 		{Name: "subnet create", Description: "Create a subnet", Run: cmdSubnetCreate},
-		{Name: "subnet delete", Description: "Delete a subnet", Run: cmdSubnetDelete},
+		{Name: "subnet delete", Description: "Delete a subnet", Run: makeTUIDelete("subnet", "Subnet", func(s *Session, id string) error {
+			_, err := s.Client.SubnetAPI.DeleteSubnet(s.Ctx, s.Org, id).Execute()
+			return err
+		})},
 
 		// Instance
 		{Name: "instance list", Description: "List all instances", Run: cmdInstanceList},
-		{Name: "instance get", Description: "Get instance details", Run: cmdInstanceGet},
+		{Name: "instance get", Description: "Get instance details", Run: makeTUIGet("instance", "Instance", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.InstanceAPI.GetInstance(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 		{Name: "instance create", Description: "Create an instance (guided)", Run: cmdInstanceCreate},
 		{Name: "instance update", Description: "Update an instance", Run: cmdInstanceUpdate},
-		{Name: "instance delete", Description: "Delete an instance", Run: cmdInstanceDelete},
+		{Name: "instance delete", Description: "Delete an instance", Run: makeTUIDelete("instance", "Instance", func(s *Session, id string) error {
+			_, err := s.Client.InstanceAPI.DeleteInstance(s.Ctx, s.Org, id).Execute()
+			return err
+		})},
 
 		// Instance Type
 		{Name: "instance-type list", Description: "List all instance types", Run: cmdInstanceTypeList},
@@ -147,70 +222,124 @@ func AllCommands() []Command {
 		{Name: "instance-type delete", Description: "Delete an instance type", Run: cmdInstanceTypeDelete},
 
 		// Operating System
-		{Name: "operating-system list", Description: "List operating systems", Run: cmdOSList},
-		{Name: "operating-system get", Description: "Get operating system details", Run: cmdOSGet},
+		{Name: "operating-system list", Description: "List operating systems", Run: makeTUIList("operating-system")},
+		{Name: "operating-system get", Description: "Get operating system details", Run: makeTUIGet("operating-system", "Operating System", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.OperatingSystemAPI.GetOperatingSystem(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 		{Name: "operating-system create", Description: "Create an operating system", Run: cmdOSCreate},
 		{Name: "operating-system update", Description: "Update an operating system", Run: cmdOSUpdate},
-		{Name: "operating-system delete", Description: "Delete an operating system", Run: cmdOSDelete},
+		{Name: "operating-system delete", Description: "Delete an operating system", Run: makeTUIDelete("operating-system", "Operating System", func(s *Session, id string) error {
+			_, err := s.Client.OperatingSystemAPI.DeleteOperatingSystem(s.Ctx, s.Org, id).Execute()
+			return err
+		})},
 
 		// SSH Key Group
-		{Name: "ssh-key-group list", Description: "List SSH key groups", Run: cmdSSHKeyGroupList},
-		{Name: "ssh-key-group get", Description: "Get SSH key group details", Run: cmdSSHKeyGroupGet},
+		{Name: "ssh-key-group list", Description: "List SSH key groups", Run: makeTUIList("ssh-key-group")},
+		{Name: "ssh-key-group get", Description: "Get SSH key group details", Run: makeTUIGet("ssh-key-group", "SSH Key Group", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.SSHKeyGroupAPI.GetSshKeyGroup(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// Allocation
 		{Name: "allocation list", Description: "List allocations", Run: cmdAllocationList},
-		{Name: "allocation get", Description: "Get allocation details", Run: cmdAllocationGet},
-		{Name: "allocation delete", Description: "Delete an allocation", Run: cmdAllocationDelete},
+		{Name: "allocation get", Description: "Get allocation details", Run: makeTUIGet("allocation", "Allocation", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.AllocationAPI.GetAllocation(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
+		{Name: "allocation delete", Description: "Delete an allocation", Run: makeTUIDelete("allocation", "Allocation", func(s *Session, id string) error {
+			_, err := s.Client.AllocationAPI.DeleteAllocation(s.Ctx, s.Org, id).Execute()
+			return err
+		})},
 
 		// Machine
 		{Name: "machine list", Description: "List machines", Run: cmdMachineList},
-		{Name: "machine get", Description: "Get machine details", Run: cmdMachineGet},
+		{Name: "machine get", Description: "Get machine details", Run: makeTUIGet("machine", "Machine", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.MachineAPI.GetMachine(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// IP Block
 		{Name: "ip-block list", Description: "List IP blocks", Run: cmdIPBlockList},
-		{Name: "ip-block get", Description: "Get IP block details", Run: cmdIPBlockGet},
+		{Name: "ip-block get", Description: "Get IP block details", Run: makeTUIGet("ip-block", "IP Block", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.IPBlockAPI.GetIpblock(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 		{Name: "ip-block create", Description: "Create an IP block", Run: cmdIPBlockCreate},
-		{Name: "ip-block delete", Description: "Delete an IP block", Run: cmdIPBlockDelete},
+		{Name: "ip-block delete", Description: "Delete an IP block", Run: makeTUIDelete("ip-block", "IP Block", func(s *Session, id string) error {
+			_, err := s.Client.IPBlockAPI.DeleteIpblock(s.Ctx, s.Org, id).Execute()
+			return err
+		})},
 
 		// Network Security Group
-		{Name: "network-security-group list", Description: "List network security groups", Run: cmdNSGList},
-		{Name: "network-security-group get", Description: "Get network security group details", Run: cmdNSGGet},
+		{Name: "network-security-group list", Description: "List network security groups", Run: makeTUIList("network-security-group")},
+		{Name: "network-security-group get", Description: "Get network security group details", Run: makeTUIGet("network-security-group", "Network Security Group", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.NetworkSecurityGroupAPI.GetNetworkSecurityGroup(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// SSH Key
 		{Name: "ssh-key list", Description: "List SSH keys", Run: cmdSSHKeyList},
-		{Name: "ssh-key get", Description: "Get SSH key details", Run: cmdSSHKeyGet},
+		{Name: "ssh-key get", Description: "Get SSH key details", Run: makeTUIGet("ssh-key", "SSH Key", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.SSHKeyAPI.GetSshKey(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// SKU
 		{Name: "sku list", Description: "List SKUs", Run: cmdSKUList},
-		{Name: "sku get", Description: "Get SKU details", Run: cmdSKUGet},
+		{Name: "sku get", Description: "Get SKU details", Run: makeTUIGet("sku", "SKU", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.SKUAPI.GetSku(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// Rack
 		{Name: "rack list", Description: "List racks", Run: cmdRackList},
-		{Name: "rack get", Description: "Get rack details", Run: cmdRackGet},
+		{Name: "rack get", Description: "Get rack details", Run: makeTUIGet("rack", "Rack", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.RackAPI.GetRack(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// VPC Prefix
 		{Name: "vpc-prefix list", Description: "List VPC prefixes", Run: cmdVPCPrefixList},
-		{Name: "vpc-prefix get", Description: "Get VPC prefix details", Run: cmdVPCPrefixGet},
+		{Name: "vpc-prefix get", Description: "Get VPC prefix details", Run: makeTUIGet("vpc-prefix", "VPC Prefix", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.VPCPrefixAPI.GetVpcPrefix(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// Tenant Account
 		{Name: "tenant-account list", Description: "List tenant accounts", Run: cmdTenantAccountList},
-		{Name: "tenant-account get", Description: "Get tenant account details", Run: cmdTenantAccountGet},
+		{Name: "tenant-account get", Description: "Get tenant account details", Run: makeTUIGet("tenant-account", "Tenant Account", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.TenantAccountAPI.GetTenantAccount(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// Expected Machine
 		{Name: "expected-machine list", Description: "List expected machines", Run: cmdExpectedMachineList},
-		{Name: "expected-machine get", Description: "Get expected machine details", Run: cmdExpectedMachineGet},
+		{Name: "expected-machine get", Description: "Get expected machine details", Run: makeTUIGet("expected-machine", "Expected Machine", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.ExpectedMachineAPI.GetExpectedMachine(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// DPU Extension Service
 		{Name: "dpu-extension-service list", Description: "List DPU extension services", Run: cmdDPUExtensionServiceList},
-		{Name: "dpu-extension-service get", Description: "Get DPU extension service details", Run: cmdDPUExtensionServiceGet},
+		{Name: "dpu-extension-service get", Description: "Get DPU extension service details", Run: makeTUIGet("dpu-extension-service", "DPU Extension Service", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.DPUExtensionServiceAPI.GetDpuExtensionService(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// InfiniBand Partition
 		{Name: "infiniband-partition list", Description: "List InfiniBand partitions", Run: cmdInfiniBandPartitionList},
-		{Name: "infiniband-partition get", Description: "Get InfiniBand partition details", Run: cmdInfiniBandPartitionGet},
+		{Name: "infiniband-partition get", Description: "Get InfiniBand partition details", Run: makeTUIGet("infiniband-partition", "InfiniBand Partition", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.InfiniBandPartitionAPI.GetInfinibandPartition(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// NVLink Logical Partition
 		{Name: "nvlink-logical-partition list", Description: "List NVLink logical partitions", Run: cmdNVLinkLogicalPartitionList},
-		{Name: "nvlink-logical-partition get", Description: "Get NVLink logical partition details", Run: cmdNVLinkLogicalPartitionGet},
+		{Name: "nvlink-logical-partition get", Description: "Get NVLink logical partition details", Run: makeTUIGet("nvlink-logical-partition", "NVLink Logical Partition", func(s *Session, id string) (interface{}, error) {
+			r, _, err := s.Client.NVLinkLogicalPartitionAPI.GetNvlinkLogicalPartition(s.Ctx, s.Org, id).Execute()
+			return r, err
+		})},
 
 		// Allocation Constraint (requires allocation context)
 		{Name: "allocation-constraint list", Description: "List allocation constraints for an allocation", Run: cmdAllocationConstraintList},
@@ -219,13 +348,62 @@ func AllCommands() []Command {
 		// Admin / informational
 		{Name: "audit list", Description: "List audit log entries", Run: cmdAuditList},
 		{Name: "audit get", Description: "Get audit log entry details", Run: cmdAuditGet},
-		{Name: "metadata get", Description: "Get API metadata", Run: cmdMetadataGet},
-		{Name: "user current", Description: "Get current user", Run: cmdUserCurrent},
-		{Name: "service-account current", Description: "Get current service account", Run: cmdServiceAccountCurrent},
-		{Name: "infrastructure-provider current", Description: "Get current infrastructure provider", Run: cmdInfrastructureProviderCurrent},
-		{Name: "infrastructure-provider stats", Description: "Get infrastructure provider stats", Run: cmdInfrastructureProviderStats},
-		{Name: "tenant current", Description: "Get current tenant", Run: cmdTenantCurrent},
-		{Name: "tenant stats", Description: "Get tenant stats", Run: cmdTenantStats},
+		{Name: "metadata get", Description: "Get API metadata", Run: func(s *Session, args []string) error {
+			LogCmd("metadata", "get")
+			r, _, err := s.Client.MetadataAPI.GetMetadata(s.Ctx, s.Org).Execute()
+			if err != nil {
+				return err
+			}
+			return printDetailJSON(os.Stdout, r)
+		}},
+		{Name: "user current", Description: "Get current user", Run: func(s *Session, args []string) error {
+			LogCmd("user", "current")
+			r, _, err := s.Client.UserAPI.GetUser(s.Ctx, s.Org).Execute()
+			if err != nil {
+				return err
+			}
+			return printDetailJSON(os.Stdout, r)
+		}},
+		{Name: "service-account current", Description: "Get current service account", Run: func(s *Session, args []string) error {
+			LogCmd("service-account", "current")
+			r, _, err := s.Client.ServiceAccountAPI.GetCurrentServiceAccount(s.Ctx, s.Org).Execute()
+			if err != nil {
+				return err
+			}
+			return printDetailJSON(os.Stdout, r)
+		}},
+		{Name: "infrastructure-provider current", Description: "Get current infrastructure provider", Run: func(s *Session, args []string) error {
+			LogCmd("infrastructure-provider", "current")
+			r, _, err := s.Client.InfrastructureProviderAPI.GetCurrentInfrastructureProvider(s.Ctx, s.Org).Execute()
+			if err != nil {
+				return err
+			}
+			return printDetailJSON(os.Stdout, r)
+		}},
+		{Name: "infrastructure-provider stats", Description: "Get infrastructure provider stats", Run: func(s *Session, args []string) error {
+			LogCmd("infrastructure-provider", "stats")
+			r, _, err := s.Client.InfrastructureProviderAPI.GetCurrentInfrastructureProviderStats(s.Ctx, s.Org).Execute()
+			if err != nil {
+				return err
+			}
+			return printDetailJSON(os.Stdout, r)
+		}},
+		{Name: "tenant current", Description: "Get current tenant", Run: func(s *Session, args []string) error {
+			LogCmd("tenant", "current")
+			r, _, err := s.Client.TenantAPI.GetCurrentTenant(s.Ctx, s.Org).Execute()
+			if err != nil {
+				return err
+			}
+			return printDetailJSON(os.Stdout, r)
+		}},
+		{Name: "tenant stats", Description: "Get tenant stats", Run: func(s *Session, args []string) error {
+			LogCmd("tenant", "stats")
+			r, _, err := s.Client.TenantAPI.GetCurrentTenantStats(s.Ctx, s.Org).Execute()
+			if err != nil {
+				return err
+			}
+			return printDetailJSON(os.Stdout, r)
+		}},
 		{Name: "machine-capability list", Description: "List machine capabilities", Run: cmdMachineCapabilityList},
 
 		// Session
@@ -1140,16 +1318,7 @@ func hasArgFlag(parts []string, flag string) bool {
 	return false
 }
 
-// -- Command handlers --
-
-func cmdSiteList(s *Session, args []string) error {
-	LogScopedCmd(s, "site", "list")
-	items, err := s.Resolver.Fetch(s.Ctx, "site")
-	if err != nil {
-		return err
-	}
-	return printResourceTable(os.Stdout, "NAME", "STATUS", "ID", items)
-}
+// -- Custom list command handlers --
 
 func cmdVPCList(s *Session, args []string) error {
 	LogScopedCmd(s, "vpc", "list")
@@ -1182,44 +1351,6 @@ func cmdVPCList(s *Session, args []string) error {
 	return tw.Flush()
 }
 
-func cmdVPCCreate(s *Session, args []string) error {
-	site, err := s.Resolver.Resolve(s.Ctx, "site", "Site")
-	if err != nil {
-		return err
-	}
-
-	name, err := PromptText("VPC name", true)
-	if err != nil {
-		return err
-	}
-
-	desc, err := PromptText("Description (optional)", false)
-	if err != nil {
-		return err
-	}
-
-	// Log the equivalent CLI command
-	cmdParts := []string{"vpc", "create", "--name", name, "--site-id", site.ID}
-	if desc != "" {
-		cmdParts = append(cmdParts, "--description", fmt.Sprintf("%q", desc))
-	}
-	LogCmd(cmdParts...)
-
-	req := client.NewVpcCreateRequest(name, site.ID)
-	if desc != "" {
-		req.SetDescription(desc)
-	}
-
-	vpc, _, err := s.Client.VPCAPI.CreateVpc(s.Ctx, s.Org).VpcCreateRequest(*req).Execute()
-	if err != nil {
-		return fmt.Errorf("creating VPC: %w", err)
-	}
-
-	s.Cache.Invalidate("vpc")
-	fmt.Printf("%s VPC created: %s (%s)\n", Green("OK"), ptrStr(vpc.Name), ptrStr(vpc.Id))
-	return nil
-}
-
 func cmdSubnetList(s *Session, args []string) error {
 	LogScopedCmd(s, "subnet", "list")
 	items, err := s.Resolver.Fetch(s.Ctx, "subnet")
@@ -1234,48 +1365,6 @@ func cmdSubnetList(s *Session, args []string) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Name, item.Status, vpcName, item.ID)
 	}
 	return tw.Flush()
-}
-
-func cmdSubnetCreate(s *Session, args []string) error {
-	vpc, err := s.Resolver.Resolve(s.Ctx, "vpc", "VPC")
-	if err != nil {
-		return err
-	}
-
-	ipBlock, err := s.Resolver.Resolve(s.Ctx, "ip-block", "IPv4 Block")
-	if err != nil {
-		fmt.Println(Yellow("No IP blocks found. Create one first with: ip-block create"))
-		return err
-	}
-
-	name, err := PromptText("Subnet name", true)
-	if err != nil {
-		return err
-	}
-
-	prefixLenStr, err := PromptText("Prefix length (e.g. 24)", true)
-	if err != nil {
-		return err
-	}
-	var prefixLen int32
-	fmt.Sscanf(prefixLenStr, "%d", &prefixLen)
-	if prefixLen < 1 || prefixLen > 32 {
-		return fmt.Errorf("prefix length must be between 1 and 32")
-	}
-
-	LogCmd("subnet", "create", "--name", name, "--vpc-id", vpc.ID, "--ipv4-block-id", ipBlock.ID, "--prefix-length", prefixLenStr)
-
-	req := client.NewSubnetCreateRequest(name, vpc.ID, prefixLen)
-	req.Ipv4BlockId = &ipBlock.ID
-
-	subnet, _, err := s.Client.SubnetAPI.CreateSubnet(s.Ctx, s.Org).SubnetCreateRequest(*req).Execute()
-	if err != nil {
-		return fmt.Errorf("creating subnet: %w", err)
-	}
-
-	s.Cache.Invalidate("subnet")
-	fmt.Printf("%s Subnet created: %s (%s)\n", Green("OK"), ptrStr(subnet.Name), ptrStr(subnet.Id))
-	return nil
 }
 
 func cmdInstanceList(s *Session, args []string) error {
@@ -1293,55 +1382,6 @@ func cmdInstanceList(s *Session, args []string) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", item.Name, item.Status, vpcName, siteName, item.ID)
 	}
 	return tw.Flush()
-}
-
-func cmdInstanceCreate(s *Session, args []string) error {
-	return RunInstanceWizard(s)
-}
-
-func cmdInstanceUpdate(s *Session, args []string) error {
-	instance, err := s.Resolver.ResolveWithArgs(s.Ctx, "instance", "Instance to update", args)
-	if err != nil {
-		return err
-	}
-
-	name, err := PromptText("New instance name (optional)", false)
-	if err != nil {
-		return err
-	}
-	desc, err := PromptText("New description (optional)", false)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(name) == "" && strings.TrimSpace(desc) == "" {
-		return fmt.Errorf("no update fields provided")
-	}
-
-	logArgs := []string{"instance", "update", instance.ID}
-	if strings.TrimSpace(name) != "" {
-		logArgs = append(logArgs, "--name", name)
-	}
-	if strings.TrimSpace(desc) != "" {
-		logArgs = append(logArgs, "--description", desc)
-	}
-	LogCmd(logArgs...)
-
-	req := client.NewInstanceUpdateRequest()
-	if strings.TrimSpace(name) != "" {
-		req.SetName(name)
-	}
-	if strings.TrimSpace(desc) != "" {
-		req.SetDescription(desc)
-	}
-
-	updated, _, err := s.Client.InstanceAPI.UpdateInstance(s.Ctx, s.Org, instance.ID).InstanceUpdateRequest(*req).Execute()
-	if err != nil {
-		return fmt.Errorf("updating instance: %w", err)
-	}
-
-	s.Cache.Invalidate("instance")
-	fmt.Printf("%s Instance updated: %s (%s)\n", Green("OK"), ptrStr(updated.Name), ptrStr(updated.Id))
-	return printDetailJSON(os.Stdout, updated)
 }
 
 func cmdInstanceTypeList(s *Session, args []string) error {
@@ -1362,182 +1402,6 @@ func cmdInstanceTypeList(s *Session, args []string) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Name, item.Status, site.Name, item.ID)
 	}
 	return tw.Flush()
-}
-
-func cmdInstanceTypeCreate(s *Session, args []string) error {
-	site, err := s.Resolver.Resolve(s.Ctx, "site", "Site")
-	if err != nil {
-		return err
-	}
-
-	name, err := PromptText("Instance type name", true)
-	if err != nil {
-		return err
-	}
-
-	desc, err := PromptText("Description (optional)", false)
-	if err != nil {
-		return err
-	}
-
-	LogCmd("instance-type", "create", "--name", name, "--site-id", site.ID)
-
-	req := client.NewInstanceTypeCreateRequest(name, site.ID)
-	if desc != "" {
-		req.Description = &desc
-	}
-
-	it, _, err := s.Client.InstanceTypeAPI.CreateInstanceType(s.Ctx, s.Org).InstanceTypeCreateRequest(*req).Execute()
-	if err != nil {
-		return fmt.Errorf("creating instance type: %w", err)
-	}
-
-	s.Cache.Invalidate("instance-type")
-	fmt.Printf("%s Instance type created: %s (%s)\n", Green("OK"), ptrStr(it.Name), ptrStr(it.Id))
-	return nil
-}
-
-func cmdOSList(s *Session, args []string) error {
-	LogScopedCmd(s, "operating-system", "list")
-	items, err := s.Resolver.Fetch(s.Ctx, "operating-system")
-	if err != nil {
-		return err
-	}
-	return printResourceTable(os.Stdout, "NAME", "STATUS", "ID", items)
-}
-
-func cmdOSCreate(s *Session, args []string) error {
-	name, err := PromptText("Operating system name", true)
-	if err != nil {
-		return err
-	}
-	description, err := PromptText("Description (optional)", false)
-	if err != nil {
-		return err
-	}
-	ipxeScript, err := PromptText("iPXE script or URL (optional)", false)
-	if err != nil {
-		return err
-	}
-	imageURL, err := PromptText("Image URL (optional)", false)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(ipxeScript) != "" && strings.TrimSpace(imageURL) != "" {
-		return fmt.Errorf("provide either iPXE script or image URL, not both")
-	}
-
-	req := client.NewOperatingSystemCreateRequest(name)
-	tenantID, tenantErr := s.getTenantID(s.Ctx)
-	if tenantErr == nil && strings.TrimSpace(tenantID) != "" {
-		req.SetTenantId(tenantID)
-	} else {
-		provider, _, providerErr := s.Client.InfrastructureProviderAPI.GetCurrentInfrastructureProvider(s.Ctx, s.Org).Execute()
-		if providerErr != nil {
-			if tenantErr != nil {
-				return fmt.Errorf("unable to determine owning tenant/provider for operating system creation: tenant error: %v; provider error: %w", tenantErr, providerErr)
-			}
-			return fmt.Errorf("unable to determine owning provider for operating system creation: %w", providerErr)
-		}
-		providerID := strings.TrimSpace(ptrStr(provider.Id))
-		if providerID == "" {
-			return fmt.Errorf("unable to determine owning tenant/provider for operating system creation")
-		}
-		req.SetInfrastructureProviderId(providerID)
-	}
-	if strings.TrimSpace(description) != "" {
-		req.SetDescription(description)
-	}
-	if strings.TrimSpace(s.Scope.SiteID) != "" {
-		req.SetSiteIds([]string{s.Scope.SiteID})
-	}
-	if strings.TrimSpace(ipxeScript) != "" {
-		req.SetIpxeScript(ipxeScript)
-	}
-	if strings.TrimSpace(imageURL) != "" {
-		req.SetImageUrl(imageURL)
-	}
-
-	logArgs := []string{"operating-system", "create", "--name", name}
-	if req.HasTenantId() {
-		logArgs = append(logArgs, "--tenant-id", req.GetTenantId())
-	}
-	if req.HasInfrastructureProviderId() {
-		logArgs = append(logArgs, "--infrastructure-provider-id", req.GetInfrastructureProviderId())
-	}
-	if strings.TrimSpace(s.Scope.SiteID) != "" {
-		logArgs = append(logArgs, "--site-id", s.Scope.SiteID)
-	}
-	if strings.TrimSpace(ipxeScript) != "" {
-		logArgs = append(logArgs, "--ipxe-script", strconv.Quote(ipxeScript))
-	}
-	if strings.TrimSpace(imageURL) != "" {
-		logArgs = append(logArgs, "--image-url", imageURL)
-	}
-	LogCmd(logArgs...)
-
-	created, _, err := s.Client.OperatingSystemAPI.CreateOperatingSystem(s.Ctx, s.Org).OperatingSystemCreateRequest(*req).Execute()
-	if err != nil {
-		return fmt.Errorf("creating operating system: %w", err)
-	}
-
-	s.Cache.Invalidate("operating-system")
-	fmt.Printf("%s Operating system created: %s (%s)\n", Green("OK"), ptrStr(created.Name), ptrStr(created.Id))
-	return printDetailJSON(os.Stdout, created)
-}
-
-func cmdOSUpdate(s *Session, args []string) error {
-	osItem, err := s.Resolver.ResolveWithArgs(s.Ctx, "operating-system", "Operating System to update", args)
-	if err != nil {
-		return err
-	}
-
-	name, err := PromptText("New operating system name (optional)", false)
-	if err != nil {
-		return err
-	}
-	description, err := PromptText("New description (optional)", false)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(name) == "" && strings.TrimSpace(description) == "" {
-		return fmt.Errorf("no update fields provided")
-	}
-
-	logArgs := []string{"operating-system", "update", osItem.ID}
-	if strings.TrimSpace(name) != "" {
-		logArgs = append(logArgs, "--name", name)
-	}
-	if strings.TrimSpace(description) != "" {
-		logArgs = append(logArgs, "--description", description)
-	}
-	LogCmd(logArgs...)
-
-	req := client.NewOperatingSystemUpdateRequest()
-	if strings.TrimSpace(name) != "" {
-		req.SetName(name)
-	}
-	if strings.TrimSpace(description) != "" {
-		req.SetDescription(description)
-	}
-
-	updated, _, err := s.Client.OperatingSystemAPI.UpdateOperatingSystem(s.Ctx, s.Org, osItem.ID).OperatingSystemUpdateRequest(*req).Execute()
-	if err != nil {
-		return fmt.Errorf("updating operating system: %w", err)
-	}
-
-	s.Cache.Invalidate("operating-system")
-	fmt.Printf("%s Operating system updated: %s (%s)\n", Green("OK"), ptrStr(updated.Name), ptrStr(updated.Id))
-	return printDetailJSON(os.Stdout, updated)
-}
-
-func cmdSSHKeyGroupList(s *Session, args []string) error {
-	LogScopedCmd(s, "ssh-key-group", "list")
-	items, err := s.Resolver.Fetch(s.Ctx, "ssh-key-group")
-	if err != nil {
-		return err
-	}
-	return printResourceTable(os.Stdout, "NAME", "STATUS", "ID", items)
 }
 
 func cmdAllocationList(s *Session, args []string) error {
@@ -1631,56 +1495,6 @@ func cmdIPBlockList(s *Session, args []string) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", item.Name, item.Status, siteName, item.ID)
 	}
 	return tw.Flush()
-}
-
-func cmdIPBlockCreate(s *Session, args []string) error {
-	site, err := s.Resolver.Resolve(s.Ctx, "site", "Site")
-	if err != nil {
-		return err
-	}
-
-	name, err := PromptText("IP block name", true)
-	if err != nil {
-		return err
-	}
-
-	prefix, err := PromptText("Prefix (e.g. 10.0.0.0)", true)
-	if err != nil {
-		return err
-	}
-
-	prefixLen, err := PromptText("Prefix length (e.g. 16)", true)
-	if err != nil {
-		return err
-	}
-
-	var pl int32
-	fmt.Sscanf(prefixLen, "%d", &pl)
-	if pl < 1 || pl > 32 {
-		return fmt.Errorf("prefix length must be between 1 and 32")
-	}
-
-	LogCmd("ip-block", "create", "--name", name, "--site-id", site.ID, "--prefix", prefix, "--prefix-length", prefixLen)
-
-	req := client.NewIpBlockCreateRequest(name, site.ID, "DatacenterOnly", prefix, pl, "IPv4")
-
-	block, _, err := s.Client.IPBlockAPI.CreateIpblock(s.Ctx, s.Org).IpBlockCreateRequest(*req).Execute()
-	if err != nil {
-		return fmt.Errorf("creating IP block: %w", err)
-	}
-
-	s.Cache.Invalidate("ip-block")
-	fmt.Printf("%s IP block created: %s (%s)\n", Green("OK"), ptrStr(block.Name), ptrStr(block.Id))
-	return nil
-}
-
-func cmdNSGList(s *Session, args []string) error {
-	LogScopedCmd(s, "network-security-group", "list")
-	items, err := s.Resolver.Fetch(s.Ctx, "network-security-group")
-	if err != nil {
-		return err
-	}
-	return printResourceTable(os.Stdout, "NAME", "STATUS", "ID", items)
 }
 
 func cmdSSHKeyList(s *Session, args []string) error {
@@ -1864,59 +1678,337 @@ func cmdMachineCapabilityList(s *Session, args []string) error {
 	return printDetailJSON(os.Stdout, caps)
 }
 
-// -- Get/Details command handlers --
+// -- Create/Update command handlers --
 
-func cmdSiteGet(s *Session, args []string) error {
-	site, err := s.Resolver.ResolveWithArgs(s.Ctx, "site", "Site", args)
+func cmdVPCCreate(s *Session, args []string) error {
+	site, err := s.Resolver.Resolve(s.Ctx, "site", "Site")
 	if err != nil {
 		return err
 	}
-	LogCmd("site", "get", site.ID)
-	result, _, err := s.Client.SiteAPI.GetSite(s.Ctx, s.Org, site.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting site: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
 
-func cmdVPCGet(s *Session, args []string) error {
-	vpc, err := s.Resolver.ResolveWithArgs(s.Ctx, "vpc", "VPC", args)
+	name, err := PromptText("VPC name", true)
 	if err != nil {
 		return err
 	}
-	LogCmd("vpc", "get", vpc.ID)
-	result, _, err := s.Client.VPCAPI.GetVpc(s.Ctx, s.Org, vpc.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting VPC: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
 
-func cmdSubnetGet(s *Session, args []string) error {
-	subnet, err := s.Resolver.ResolveWithArgs(s.Ctx, "subnet", "Subnet", args)
+	desc, err := PromptText("Description (optional)", false)
 	if err != nil {
 		return err
 	}
-	LogCmd("subnet", "get", subnet.ID)
-	result, _, err := s.Client.SubnetAPI.GetSubnet(s.Ctx, s.Org, subnet.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting subnet: %w", err)
+
+	// Log the equivalent CLI command
+	cmdParts := []string{"vpc", "create", "--name", name, "--site-id", site.ID}
+	if desc != "" {
+		cmdParts = append(cmdParts, "--description", fmt.Sprintf("%q", desc))
 	}
-	return printDetailJSON(os.Stdout, result)
+	LogCmd(cmdParts...)
+
+	req := client.NewVpcCreateRequest(name, site.ID)
+	if desc != "" {
+		req.SetDescription(desc)
+	}
+
+	vpc, _, err := s.Client.VPCAPI.CreateVpc(s.Ctx, s.Org).VpcCreateRequest(*req).Execute()
+	if err != nil {
+		return fmt.Errorf("creating VPC: %w", err)
+	}
+
+	s.Cache.Invalidate("vpc")
+	fmt.Printf("%s VPC created: %s (%s)\n", Green("OK"), ptrStr(vpc.Name), ptrStr(vpc.Id))
+	return nil
 }
 
-func cmdInstanceGet(s *Session, args []string) error {
-	instance, err := s.Resolver.ResolveWithArgs(s.Ctx, "instance", "Instance", args)
+func cmdSubnetCreate(s *Session, args []string) error {
+	vpc, err := s.Resolver.Resolve(s.Ctx, "vpc", "VPC")
 	if err != nil {
 		return err
 	}
-	LogCmd("instance", "get", instance.ID)
-	result, _, err := s.Client.InstanceAPI.GetInstance(s.Ctx, s.Org, instance.ID).Execute()
+
+	ipBlock, err := s.Resolver.Resolve(s.Ctx, "ip-block", "IPv4 Block")
 	if err != nil {
-		return fmt.Errorf("getting instance: %w", err)
+		fmt.Println(Yellow("No IP blocks found. Create one first with: ip-block create"))
+		return err
 	}
-	return printDetailJSON(os.Stdout, result)
+
+	name, err := PromptText("Subnet name", true)
+	if err != nil {
+		return err
+	}
+
+	prefixLenStr, err := PromptText("Prefix length (e.g. 24)", true)
+	if err != nil {
+		return err
+	}
+	var prefixLen int32
+	fmt.Sscanf(prefixLenStr, "%d", &prefixLen)
+	if prefixLen < 1 || prefixLen > 32 {
+		return fmt.Errorf("prefix length must be between 1 and 32")
+	}
+
+	LogCmd("subnet", "create", "--name", name, "--vpc-id", vpc.ID, "--ipv4-block-id", ipBlock.ID, "--prefix-length", prefixLenStr)
+
+	req := client.NewSubnetCreateRequest(name, vpc.ID, prefixLen)
+	req.Ipv4BlockId = &ipBlock.ID
+
+	subnet, _, err := s.Client.SubnetAPI.CreateSubnet(s.Ctx, s.Org).SubnetCreateRequest(*req).Execute()
+	if err != nil {
+		return fmt.Errorf("creating subnet: %w", err)
+	}
+
+	s.Cache.Invalidate("subnet")
+	fmt.Printf("%s Subnet created: %s (%s)\n", Green("OK"), ptrStr(subnet.Name), ptrStr(subnet.Id))
+	return nil
 }
+
+func cmdInstanceCreate(s *Session, args []string) error {
+	return RunInstanceWizard(s)
+}
+
+func cmdInstanceUpdate(s *Session, args []string) error {
+	instance, err := s.Resolver.ResolveWithArgs(s.Ctx, "instance", "Instance to update", args)
+	if err != nil {
+		return err
+	}
+
+	name, err := PromptText("New instance name (optional)", false)
+	if err != nil {
+		return err
+	}
+	desc, err := PromptText("New description (optional)", false)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) == "" && strings.TrimSpace(desc) == "" {
+		return fmt.Errorf("no update fields provided")
+	}
+
+	logArgs := []string{"instance", "update", instance.ID}
+	if strings.TrimSpace(name) != "" {
+		logArgs = append(logArgs, "--name", name)
+	}
+	if strings.TrimSpace(desc) != "" {
+		logArgs = append(logArgs, "--description", desc)
+	}
+	LogCmd(logArgs...)
+
+	req := client.NewInstanceUpdateRequest()
+	if strings.TrimSpace(name) != "" {
+		req.SetName(name)
+	}
+	if strings.TrimSpace(desc) != "" {
+		req.SetDescription(desc)
+	}
+
+	updated, _, err := s.Client.InstanceAPI.UpdateInstance(s.Ctx, s.Org, instance.ID).InstanceUpdateRequest(*req).Execute()
+	if err != nil {
+		return fmt.Errorf("updating instance: %w", err)
+	}
+
+	s.Cache.Invalidate("instance")
+	fmt.Printf("%s Instance updated: %s (%s)\n", Green("OK"), ptrStr(updated.Name), ptrStr(updated.Id))
+	return printDetailJSON(os.Stdout, updated)
+}
+
+func cmdInstanceTypeCreate(s *Session, args []string) error {
+	site, err := s.Resolver.Resolve(s.Ctx, "site", "Site")
+	if err != nil {
+		return err
+	}
+
+	name, err := PromptText("Instance type name", true)
+	if err != nil {
+		return err
+	}
+
+	desc, err := PromptText("Description (optional)", false)
+	if err != nil {
+		return err
+	}
+
+	LogCmd("instance-type", "create", "--name", name, "--site-id", site.ID)
+
+	req := client.NewInstanceTypeCreateRequest(name, site.ID)
+	if desc != "" {
+		req.Description = &desc
+	}
+
+	it, _, err := s.Client.InstanceTypeAPI.CreateInstanceType(s.Ctx, s.Org).InstanceTypeCreateRequest(*req).Execute()
+	if err != nil {
+		return fmt.Errorf("creating instance type: %w", err)
+	}
+
+	s.Cache.Invalidate("instance-type")
+	fmt.Printf("%s Instance type created: %s (%s)\n", Green("OK"), ptrStr(it.Name), ptrStr(it.Id))
+	return nil
+}
+
+func cmdOSCreate(s *Session, args []string) error {
+	name, err := PromptText("Operating system name", true)
+	if err != nil {
+		return err
+	}
+	description, err := PromptText("Description (optional)", false)
+	if err != nil {
+		return err
+	}
+	ipxeScript, err := PromptText("iPXE script or URL (optional)", false)
+	if err != nil {
+		return err
+	}
+	imageURL, err := PromptText("Image URL (optional)", false)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(ipxeScript) != "" && strings.TrimSpace(imageURL) != "" {
+		return fmt.Errorf("provide either iPXE script or image URL, not both")
+	}
+
+	req := client.NewOperatingSystemCreateRequest(name)
+	tenantID, tenantErr := s.getTenantID(s.Ctx)
+	if tenantErr == nil && strings.TrimSpace(tenantID) != "" {
+		req.SetTenantId(tenantID)
+	} else {
+		provider, _, providerErr := s.Client.InfrastructureProviderAPI.GetCurrentInfrastructureProvider(s.Ctx, s.Org).Execute()
+		if providerErr != nil {
+			if tenantErr != nil {
+				return fmt.Errorf("unable to determine owning tenant/provider for operating system creation: tenant error: %v; provider error: %w", tenantErr, providerErr)
+			}
+			return fmt.Errorf("unable to determine owning provider for operating system creation: %w", providerErr)
+		}
+		providerID := strings.TrimSpace(ptrStr(provider.Id))
+		if providerID == "" {
+			return fmt.Errorf("unable to determine owning tenant/provider for operating system creation")
+		}
+		req.SetInfrastructureProviderId(providerID)
+	}
+	if strings.TrimSpace(description) != "" {
+		req.SetDescription(description)
+	}
+	if strings.TrimSpace(s.Scope.SiteID) != "" {
+		req.SetSiteIds([]string{s.Scope.SiteID})
+	}
+	if strings.TrimSpace(ipxeScript) != "" {
+		req.SetIpxeScript(ipxeScript)
+	}
+	if strings.TrimSpace(imageURL) != "" {
+		req.SetImageUrl(imageURL)
+	}
+
+	logArgs := []string{"operating-system", "create", "--name", name}
+	if req.HasTenantId() {
+		logArgs = append(logArgs, "--tenant-id", req.GetTenantId())
+	}
+	if req.HasInfrastructureProviderId() {
+		logArgs = append(logArgs, "--infrastructure-provider-id", req.GetInfrastructureProviderId())
+	}
+	if strings.TrimSpace(s.Scope.SiteID) != "" {
+		logArgs = append(logArgs, "--site-id", s.Scope.SiteID)
+	}
+	if strings.TrimSpace(ipxeScript) != "" {
+		logArgs = append(logArgs, "--ipxe-script", strconv.Quote(ipxeScript))
+	}
+	if strings.TrimSpace(imageURL) != "" {
+		logArgs = append(logArgs, "--image-url", imageURL)
+	}
+	LogCmd(logArgs...)
+
+	created, _, err := s.Client.OperatingSystemAPI.CreateOperatingSystem(s.Ctx, s.Org).OperatingSystemCreateRequest(*req).Execute()
+	if err != nil {
+		return fmt.Errorf("creating operating system: %w", err)
+	}
+
+	s.Cache.Invalidate("operating-system")
+	fmt.Printf("%s Operating system created: %s (%s)\n", Green("OK"), ptrStr(created.Name), ptrStr(created.Id))
+	return printDetailJSON(os.Stdout, created)
+}
+
+func cmdOSUpdate(s *Session, args []string) error {
+	osItem, err := s.Resolver.ResolveWithArgs(s.Ctx, "operating-system", "Operating System to update", args)
+	if err != nil {
+		return err
+	}
+
+	name, err := PromptText("New operating system name (optional)", false)
+	if err != nil {
+		return err
+	}
+	description, err := PromptText("New description (optional)", false)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) == "" && strings.TrimSpace(description) == "" {
+		return fmt.Errorf("no update fields provided")
+	}
+
+	logArgs := []string{"operating-system", "update", osItem.ID}
+	if strings.TrimSpace(name) != "" {
+		logArgs = append(logArgs, "--name", name)
+	}
+	if strings.TrimSpace(description) != "" {
+		logArgs = append(logArgs, "--description", description)
+	}
+	LogCmd(logArgs...)
+
+	req := client.NewOperatingSystemUpdateRequest()
+	if strings.TrimSpace(name) != "" {
+		req.SetName(name)
+	}
+	if strings.TrimSpace(description) != "" {
+		req.SetDescription(description)
+	}
+
+	updated, _, err := s.Client.OperatingSystemAPI.UpdateOperatingSystem(s.Ctx, s.Org, osItem.ID).OperatingSystemUpdateRequest(*req).Execute()
+	if err != nil {
+		return fmt.Errorf("updating operating system: %w", err)
+	}
+
+	s.Cache.Invalidate("operating-system")
+	fmt.Printf("%s Operating system updated: %s (%s)\n", Green("OK"), ptrStr(updated.Name), ptrStr(updated.Id))
+	return printDetailJSON(os.Stdout, updated)
+}
+
+func cmdIPBlockCreate(s *Session, args []string) error {
+	site, err := s.Resolver.Resolve(s.Ctx, "site", "Site")
+	if err != nil {
+		return err
+	}
+
+	name, err := PromptText("IP block name", true)
+	if err != nil {
+		return err
+	}
+
+	prefix, err := PromptText("Prefix (e.g. 10.0.0.0)", true)
+	if err != nil {
+		return err
+	}
+
+	prefixLen, err := PromptText("Prefix length (e.g. 16)", true)
+	if err != nil {
+		return err
+	}
+
+	var pl int32
+	fmt.Sscanf(prefixLen, "%d", &pl)
+	if pl < 1 || pl > 32 {
+		return fmt.Errorf("prefix length must be between 1 and 32")
+	}
+
+	LogCmd("ip-block", "create", "--name", name, "--site-id", site.ID, "--prefix", prefix, "--prefix-length", prefixLen)
+
+	req := client.NewIpBlockCreateRequest(name, site.ID, "DatacenterOnly", prefix, pl, "IPv4")
+
+	block, _, err := s.Client.IPBlockAPI.CreateIpblock(s.Ctx, s.Org).IpBlockCreateRequest(*req).Execute()
+	if err != nil {
+		return fmt.Errorf("creating IP block: %w", err)
+	}
+
+	s.Cache.Invalidate("ip-block")
+	fmt.Printf("%s IP block created: %s (%s)\n", Green("OK"), ptrStr(block.Name), ptrStr(block.Id))
+	return nil
+}
+
+// -- Custom get command handlers --
 
 func cmdInstanceTypeGet(s *Session, args []string) error {
 	site, err := s.Resolver.Resolve(s.Ctx, "site", "Site")
@@ -1935,201 +2027,6 @@ func cmdInstanceTypeGet(s *Session, args []string) error {
 	result, _, err := s.Client.InstanceTypeAPI.GetInstanceType(s.Ctx, s.Org, selected.ID).Execute()
 	if err != nil {
 		return fmt.Errorf("getting instance type: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdOSGet(s *Session, args []string) error {
-	osItem, err := s.Resolver.ResolveWithArgs(s.Ctx, "operating-system", "Operating System", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("operating-system", "get", osItem.ID)
-	result, _, err := s.Client.OperatingSystemAPI.GetOperatingSystem(s.Ctx, s.Org, osItem.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting operating system: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdSSHKeyGroupGet(s *Session, args []string) error {
-	group, err := s.Resolver.ResolveWithArgs(s.Ctx, "ssh-key-group", "SSH Key Group", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("ssh-key-group", "get", group.ID)
-	result, _, err := s.Client.SSHKeyGroupAPI.GetSshKeyGroup(s.Ctx, s.Org, group.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting SSH key group: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdAllocationGet(s *Session, args []string) error {
-	alloc, err := s.Resolver.ResolveWithArgs(s.Ctx, "allocation", "Allocation", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("allocation", "get", alloc.ID)
-	result, _, err := s.Client.AllocationAPI.GetAllocation(s.Ctx, s.Org, alloc.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting allocation: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdMachineGet(s *Session, args []string) error {
-	machine, err := s.Resolver.ResolveWithArgs(s.Ctx, "machine", "Machine", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("machine", "get", machine.ID)
-	result, _, err := s.Client.MachineAPI.GetMachine(s.Ctx, s.Org, machine.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting machine: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdIPBlockGet(s *Session, args []string) error {
-	block, err := s.Resolver.ResolveWithArgs(s.Ctx, "ip-block", "IP Block", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("ip-block", "get", block.ID)
-	result, _, err := s.Client.IPBlockAPI.GetIpblock(s.Ctx, s.Org, block.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting IP block: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdNSGGet(s *Session, args []string) error {
-	nsg, err := s.Resolver.ResolveWithArgs(s.Ctx, "network-security-group", "Network Security Group", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("network-security-group", "get", nsg.ID)
-	result, _, err := s.Client.NetworkSecurityGroupAPI.GetNetworkSecurityGroup(s.Ctx, s.Org, nsg.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting network security group: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdSSHKeyGet(s *Session, args []string) error {
-	key, err := s.Resolver.ResolveWithArgs(s.Ctx, "ssh-key", "SSH Key", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("ssh-key", "get", key.ID)
-	result, _, err := s.Client.SSHKeyAPI.GetSshKey(s.Ctx, s.Org, key.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting SSH key: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdSKUGet(s *Session, args []string) error {
-	sku, err := s.Resolver.ResolveWithArgs(s.Ctx, "sku", "SKU", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("sku", "get", sku.ID)
-	result, _, err := s.Client.SKUAPI.GetSku(s.Ctx, s.Org, sku.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting SKU: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdRackGet(s *Session, args []string) error {
-	rack, err := s.Resolver.ResolveWithArgs(s.Ctx, "rack", "Rack", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("rack", "get", rack.ID)
-	result, _, err := s.Client.RackAPI.GetRack(s.Ctx, s.Org, rack.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting rack: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdVPCPrefixGet(s *Session, args []string) error {
-	prefix, err := s.Resolver.ResolveWithArgs(s.Ctx, "vpc-prefix", "VPC Prefix", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("vpc-prefix", "get", prefix.ID)
-	result, _, err := s.Client.VPCPrefixAPI.GetVpcPrefix(s.Ctx, s.Org, prefix.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting VPC prefix: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdTenantAccountGet(s *Session, args []string) error {
-	account, err := s.Resolver.ResolveWithArgs(s.Ctx, "tenant-account", "Tenant Account", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("tenant-account", "get", account.ID)
-	result, _, err := s.Client.TenantAccountAPI.GetTenantAccount(s.Ctx, s.Org, account.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting tenant account: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdExpectedMachineGet(s *Session, args []string) error {
-	machine, err := s.Resolver.ResolveWithArgs(s.Ctx, "expected-machine", "Expected Machine", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("expected-machine", "get", machine.ID)
-	result, _, err := s.Client.ExpectedMachineAPI.GetExpectedMachine(s.Ctx, s.Org, machine.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting expected machine: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdDPUExtensionServiceGet(s *Session, args []string) error {
-	service, err := s.Resolver.ResolveWithArgs(s.Ctx, "dpu-extension-service", "DPU Extension Service", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("dpu-extension-service", "get", service.ID)
-	result, _, err := s.Client.DPUExtensionServiceAPI.GetDpuExtensionService(s.Ctx, s.Org, service.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting DPU extension service: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdInfiniBandPartitionGet(s *Session, args []string) error {
-	partition, err := s.Resolver.ResolveWithArgs(s.Ctx, "infiniband-partition", "InfiniBand Partition", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("infiniband-partition", "get", partition.ID)
-	result, _, err := s.Client.InfiniBandPartitionAPI.GetInfinibandPartition(s.Ctx, s.Org, partition.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting InfiniBand partition: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdNVLinkLogicalPartitionGet(s *Session, args []string) error {
-	partition, err := s.Resolver.ResolveWithArgs(s.Ctx, "nvlink-logical-partition", "NVLink Logical Partition", args)
-	if err != nil {
-		return err
-	}
-	LogCmd("nvlink-logical-partition", "get", partition.ID)
-	result, _, err := s.Client.NVLinkLogicalPartitionAPI.GetNvlinkLogicalPartition(s.Ctx, s.Org, partition.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("getting NVLink logical partition: %w", err)
 	}
 	return printDetailJSON(os.Stdout, result)
 }
@@ -2194,165 +2091,7 @@ func cmdAuditGet(s *Session, args []string) error {
 	return printDetailJSON(os.Stdout, result)
 }
 
-func cmdMetadataGet(s *Session, args []string) error {
-	LogCmd("metadata", "get")
-	result, _, err := s.Client.MetadataAPI.GetMetadata(s.Ctx, s.Org).Execute()
-	if err != nil {
-		return fmt.Errorf("getting metadata: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdUserCurrent(s *Session, args []string) error {
-	LogCmd("user", "current")
-	result, _, err := s.Client.UserAPI.GetUser(s.Ctx, s.Org).Execute()
-	if err != nil {
-		return fmt.Errorf("getting current user: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdServiceAccountCurrent(s *Session, args []string) error {
-	LogCmd("service-account", "current")
-	result, _, err := s.Client.ServiceAccountAPI.GetCurrentServiceAccount(s.Ctx, s.Org).Execute()
-	if err != nil {
-		return fmt.Errorf("getting current service account: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdInfrastructureProviderCurrent(s *Session, args []string) error {
-	LogCmd("infrastructure-provider", "current")
-	result, _, err := s.Client.InfrastructureProviderAPI.GetCurrentInfrastructureProvider(s.Ctx, s.Org).Execute()
-	if err != nil {
-		return fmt.Errorf("getting current infrastructure provider: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdInfrastructureProviderStats(s *Session, args []string) error {
-	LogCmd("infrastructure-provider", "stats")
-	result, _, err := s.Client.InfrastructureProviderAPI.GetCurrentInfrastructureProviderStats(s.Ctx, s.Org).Execute()
-	if err != nil {
-		return fmt.Errorf("getting infrastructure provider stats: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdTenantCurrent(s *Session, args []string) error {
-	LogCmd("tenant", "current")
-	result, _, err := s.Client.TenantAPI.GetCurrentTenant(s.Ctx, s.Org).Execute()
-	if err != nil {
-		return fmt.Errorf("getting current tenant: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-func cmdTenantStats(s *Session, args []string) error {
-	LogCmd("tenant", "stats")
-	result, _, err := s.Client.TenantAPI.GetCurrentTenantStats(s.Ctx, s.Org).Execute()
-	if err != nil {
-		return fmt.Errorf("getting tenant stats: %w", err)
-	}
-	return printDetailJSON(os.Stdout, result)
-}
-
-// -- Delete command handlers --
-
-func cmdSiteDelete(s *Session, args []string) error {
-	site, err := s.Resolver.ResolveWithArgs(s.Ctx, "site", "Site to delete", args)
-	if err != nil {
-		return err
-	}
-	ok, err := PromptConfirm(fmt.Sprintf("Delete site %s (%s)?", site.Name, site.ID))
-	if err != nil || !ok {
-		return err
-	}
-	LogCmd("site", "delete", site.ID)
-	_, err = s.Client.SiteAPI.DeleteSite(s.Ctx, s.Org, site.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("deleting site: %w", err)
-	}
-	s.Cache.Invalidate("site")
-	fmt.Printf("%s Site deleted: %s\n", Green("OK"), site.Name)
-	return nil
-}
-
-func cmdVPCDelete(s *Session, args []string) error {
-	vpc, err := s.Resolver.ResolveWithArgs(s.Ctx, "vpc", "VPC to delete", args)
-	if err != nil {
-		return err
-	}
-	ok, err := PromptConfirm(fmt.Sprintf("Delete VPC %s (%s)?", vpc.Name, vpc.ID))
-	if err != nil || !ok {
-		return err
-	}
-	LogCmd("vpc", "delete", vpc.ID)
-	_, err = s.Client.VPCAPI.DeleteVpc(s.Ctx, s.Org, vpc.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("deleting VPC: %w", err)
-	}
-	s.Cache.Invalidate("vpc")
-	fmt.Printf("%s VPC deleted: %s\n", Green("OK"), vpc.Name)
-	return nil
-}
-
-func cmdSubnetDelete(s *Session, args []string) error {
-	subnet, err := s.Resolver.ResolveWithArgs(s.Ctx, "subnet", "Subnet to delete", args)
-	if err != nil {
-		return err
-	}
-	ok, err := PromptConfirm(fmt.Sprintf("Delete subnet %s (%s)?", subnet.Name, subnet.ID))
-	if err != nil || !ok {
-		return err
-	}
-	LogCmd("subnet", "delete", subnet.ID)
-	_, err = s.Client.SubnetAPI.DeleteSubnet(s.Ctx, s.Org, subnet.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("deleting subnet: %w", err)
-	}
-	s.Cache.Invalidate("subnet")
-	fmt.Printf("%s Subnet deleted: %s\n", Green("OK"), subnet.Name)
-	return nil
-}
-
-func cmdInstanceDelete(s *Session, args []string) error {
-	instance, err := s.Resolver.ResolveWithArgs(s.Ctx, "instance", "Instance to delete", args)
-	if err != nil {
-		return err
-	}
-	ok, err := PromptConfirm(fmt.Sprintf("Delete instance %s (%s)?", instance.Name, instance.ID))
-	if err != nil || !ok {
-		return err
-	}
-	LogCmd("instance", "delete", instance.ID)
-	_, err = s.Client.InstanceAPI.DeleteInstance(s.Ctx, s.Org, instance.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("deleting instance: %w", err)
-	}
-	s.Cache.Invalidate("instance")
-	fmt.Printf("%s Instance deleted: %s\n", Green("OK"), instance.Name)
-	return nil
-}
-
-func cmdOSDelete(s *Session, args []string) error {
-	osItem, err := s.Resolver.ResolveWithArgs(s.Ctx, "operating-system", "Operating System to delete", args)
-	if err != nil {
-		return err
-	}
-	ok, err := PromptConfirm(fmt.Sprintf("Delete operating system %s (%s)?", osItem.Name, osItem.ID))
-	if err != nil || !ok {
-		return err
-	}
-	LogCmd("operating-system", "delete", osItem.ID)
-	_, err = s.Client.OperatingSystemAPI.DeleteOperatingSystem(s.Ctx, s.Org, osItem.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("deleting operating system: %w", err)
-	}
-	s.Cache.Invalidate("operating-system")
-	fmt.Printf("%s Operating system deleted: %s\n", Green("OK"), osItem.Name)
-	return nil
-}
+// -- Custom delete command handler --
 
 func cmdInstanceTypeDelete(s *Session, args []string) error {
 	site, err := s.Resolver.Resolve(s.Ctx, "site", "Site")
@@ -2381,43 +2120,7 @@ func cmdInstanceTypeDelete(s *Session, args []string) error {
 	return nil
 }
 
-func cmdAllocationDelete(s *Session, args []string) error {
-	alloc, err := s.Resolver.ResolveWithArgs(s.Ctx, "allocation", "Allocation to delete", args)
-	if err != nil {
-		return err
-	}
-	ok, err := PromptConfirm(fmt.Sprintf("Delete allocation %s (%s)?", alloc.Name, alloc.ID))
-	if err != nil || !ok {
-		return err
-	}
-	LogCmd("allocation", "delete", alloc.ID)
-	_, err = s.Client.AllocationAPI.DeleteAllocation(s.Ctx, s.Org, alloc.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("deleting allocation: %w", err)
-	}
-	s.Cache.Invalidate("allocation")
-	fmt.Printf("%s Allocation deleted: %s\n", Green("OK"), alloc.Name)
-	return nil
-}
-
-func cmdIPBlockDelete(s *Session, args []string) error {
-	block, err := s.Resolver.ResolveWithArgs(s.Ctx, "ip-block", "IP Block to delete", args)
-	if err != nil {
-		return err
-	}
-	ok, err := PromptConfirm(fmt.Sprintf("Delete IP block %s (%s)?", block.Name, block.ID))
-	if err != nil || !ok {
-		return err
-	}
-	LogCmd("ip-block", "delete", block.ID)
-	_, err = s.Client.IPBlockAPI.DeleteIpblock(s.Ctx, s.Org, block.ID).Execute()
-	if err != nil {
-		return fmt.Errorf("deleting IP block: %w", err)
-	}
-	s.Cache.Invalidate("ip-block")
-	fmt.Printf("%s IP block deleted: %s\n", Green("OK"), block.Name)
-	return nil
-}
+// -- Session commands --
 
 func cmdLogin(s *Session, args []string) error {
 	if s.LoginFn == nil {

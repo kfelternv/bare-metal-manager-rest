@@ -445,6 +445,7 @@ generate-client:
 		--additional-properties=isGoSubmodule=true,enumClassPrefix=true \
 		--global-property=apis,models,supportingFiles
 	rm -rf client/docs client/api client/README.md client/test client/.openapi-generator
+	cp openapi/spec.yaml cmd/bmmcli/cmd/spec.yaml
 	@echo "Client generated in client/"
 	go build ./client/...
 	@echo "Client compiles successfully"

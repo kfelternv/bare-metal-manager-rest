@@ -77,6 +77,8 @@ func init() {
 	rootCmd.PersistentFlags().StringP("output", "o", "", "output format: json, yaml (default from config)")
 
 	configureViper()
+
+	RegisterSpecCommands()
 }
 
 func initConfig() {

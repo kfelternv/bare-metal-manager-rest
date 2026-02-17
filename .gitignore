@@ -18,3 +18,7 @@ carbide-rest
 .test-config/
 .idea/
 ref/
+bmmcli
+siri_speak.txt
+siri_cmd.txt
+siri_cmd_output.txt
