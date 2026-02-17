@@ -439,13 +439,13 @@ generate-client:
 	openapi-generator generate \
 		-i openapi/spec.yaml \
 		-g go \
-		-o client \
-		--package-name client \
+		-o sdk/standard \
+		--package-name standard \
 		--additional-properties=isGoSubmodule=true,enumClassPrefix=true \
 		--global-property=apis,models,supportingFiles
-	rm -rf client/docs client/api client/README.md client/test client/.openapi-generator
-	@echo "Client generated in client/"
-	go build ./client/...
+	rm -rf sdk/standard/docs sdk/standard/api sdk/standard/README.md sdk/standard/test sdk/standard/.openapi-generator
+	@echo "Client generated in sdk/standard/"
+	go build ./sdk/standard/...
 	@echo "Client compiles successfully"
 
 # =============================================================================
