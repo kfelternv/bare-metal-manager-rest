@@ -1526,7 +1526,6 @@ func cmdAllocationList(s *Session, args []string) error {
 }
 
 func cmdMachineList(s *Session, args []string) error {
-	LogScopedCmd(s, "machine", "list")
 	if s.Scope.VpcID != "" {
 		fmt.Printf("%s Showing machines attached to instances in scoped VPC.\n", Dim("Note:"))
 	}
@@ -1559,6 +1558,9 @@ func cmdMachineList(s *Session, args []string) error {
 		}
 		fmt.Printf("%s Applied site scope %s (%s) for machine listing.\n", Dim("Note:"), site.Name, site.ID)
 	}
+
+	// Log after scope is fully resolved so --site-id and --vpc-id appear.
+	LogScopedCmd(s, "machine", "list")
 
 	if s.Scope.VpcID != "" && len(items) == 0 {
 		fmt.Printf("%s No machines are currently attached to instances in this VPC.\n", Dim("Note:"))
