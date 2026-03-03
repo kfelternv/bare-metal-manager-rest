@@ -114,9 +114,9 @@ func AllCommands() []Command {
 	}
 }
 
-// LogCmd prints the equivalent bmmcli one-liner for reference.
+// LogCmd prints the equivalent carbidecli one-liner for reference.
 func LogCmd(s *Session, parts ...string) {
-	cmdParts := []string{"bmmcli"}
+	cmdParts := []string{"carbidecli"}
 	if s != nil && strings.TrimSpace(s.ConfigPath) != "" {
 		cmdParts = append(cmdParts, "--config", s.ConfigPath)
 	}
